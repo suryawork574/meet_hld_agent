@@ -93,7 +93,7 @@
     </header>
 
     <main>
-      <div class="diagram-panel fullscreen">
+      <div class="diagram-panel">
         <div id="voice-command-banner" class="voice-command-banner hidden">
           <div class="voice-command-icon">&#127908;</div>
           <div class="voice-command-content">
@@ -129,6 +129,10 @@
 
     <!-- Floating widget buttons -->
     <div class="floating-widgets">
+      <div class="widget-btn" id="widget-btn-tasks" title="Task Breakdown">
+        <span class="widget-icon">&#9776;</span>
+        <span class="widget-label">Tasks</span>
+      </div>
       <div class="widget-btn" id="widget-btn-suggestions" title="Design Recommendations">
         <span class="widget-icon">&#128161;</span>
         <span class="widget-label">Suggestions</span>
@@ -140,6 +144,20 @@
       <div class="widget-btn" id="widget-btn-transcript" title="Raw Transcript">
         <span class="widget-icon">&#127908;</span>
         <span class="widget-label">Transcript</span>
+      </div>
+    </div>
+
+    <!-- Floating popup: Tasks -->
+    <div class="floating-popup floating-popup-wide hidden" id="popup-tasks">
+      <div class="popup-header">
+        <h3>&#9776; Task Breakdown</h3>
+        <div class="popup-header-actions">
+          <button id="regenerate-btn" class="btn-regenerate hidden" title="Regenerate all content from transcript">&#x21BB; Regenerate All</button>
+          <span class="tasks-badge">Jira-Style</span>
+        </div>
+      </div>
+      <div class="popup-body" id="tasks-container">
+        <div class="tasks-placeholder">Tasks will be generated as the design discussion progresses...</div>
       </div>
     </div>
 

@@ -227,6 +227,76 @@ function injectStyles(code: string): string {
   return code + '\n' + styleLines.join('\n');
 }
 
+const TASKS_PROMPT = `You are a senior engineering project manager. Based on the system design discussion transcript, break down the design into actionable development tasks in Jira-style format.
+
+Output ONLY an HTML list of task cards using this exact structure:
+
+<div class="task-card">
+  <div class="task-header">
+    <span class="task-id">TASK-{N}</span>
+    <span class="task-priority priority-{high|medium|low}">{High|Medium|Low}</span>
+  </div>
+  <div class="task-name">{Task Title}</div>
+  <div class="task-field">
+    <div class="task-field-label">Description</div>
+    <div class="task-field-value">{2-3 sentence description of the implementation work}</div>
+  </div>
+  <div class="task-field">
+    <div class="task-field-label">Acceptance Criteria</div>
+    <ul class="task-ac">
+      <li>{criterion 1}</li>
+      <li>{criterion 2}</li>
+      <li>{criterion 3}</li>
+    </ul>
+  </div>
+  <div class="task-field">
+    <div class="task-field-label">Estimated Timeline</div>
+    <div class="task-field-value">{estimated time for AI code generation, e.g. "~2 hours with AI-assisted code generation" or "~30 mins with AI scaffolding"}</div>
+  </div>
+</div>
+
+Rules:
+- Output ONLY the HTML task cards, nothing else. No markdown fences.
+- Generate 3-8 tasks depending on the complexity discussed
+- Order tasks by priority (High first, then Medium, then Low)
+- Task IDs should be sequential: TASK-1, TASK-2, etc.
+- Each task should represent a concrete, implementable unit of work
+- Acceptance criteria should be specific and testable (2-4 per task)
+- Timelines should reflect AI-assisted code generation speed (faster than manual):
+  - Simple CRUD/boilerplate: ~15-30 mins
+  - Service with business logic: ~1-2 hours
+  - Complex integration/infrastructure: ~2-4 hours
+  - Full feature with tests: ~3-6 hours
+- Include tasks for: services, databases, APIs, infrastructure, testing, monitoring
+- Be specific to the architecture discussed, not generic
+
+Current system design diagram:
+{DIAGRAM}
+
+Meeting transcript:
+{TRANSCRIPT}`;
+
+export async function generateTasks(transcript: string): Promise<string | null> {
+  try {
+    const model = genAI.getGenerativeModel({ model: config.geminiModel });
+    const prompt = TASKS_PROMPT
+      .replace('{DIAGRAM}', previousDiagram || 'No diagram yet')
+      .replace('{TRANSCRIPT}', transcript);
+
+    logger.info('Generating task breakdown from transcript...');
+    const result = await model.generateContent(prompt);
+    let html = result.response.text().trim();
+
+    html = html.replace(/^```html?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    logger.info('Task breakdown generated successfully');
+    return html;
+  } catch (err) {
+    logger.error({ err }, 'Failed to generate tasks');
+    return null;
+  }
+}
+
 function isValidMermaidSyntax(code: string): boolean {
   if (!code || code.length < 10) return false;
 

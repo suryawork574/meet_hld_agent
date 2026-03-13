@@ -9,6 +9,7 @@ export interface MeetingData {
   summary: string;
   diagram: string;
   advice: string;
+  tasks?: string;
   savedAt: string;
 }
 

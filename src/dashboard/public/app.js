@@ -52,6 +52,10 @@ let showCode = false;
 let renderCounter = 0;
 let entryCount = 0;
 
+// Track loaded meeting for regeneration
+let loadedMeetingId = null;
+let loadedMeetingDate = null;
+
 // Zoom state
 let currentZoom = 1;
 const ZOOM_STEP = 0.15;
@@ -174,6 +178,13 @@ socket.on('advice:update', (adviceHtml) => {
   const adviceContainer = document.getElementById('advice-container');
   if (adviceHtml) {
     adviceContainer.innerHTML = adviceHtml;
+  }
+});
+
+socket.on('tasks:update', (tasksHtml) => {
+  const tasksContainer = document.getElementById('tasks-container');
+  if (tasksHtml) {
+    tasksContainer.innerHTML = tasksHtml;
   }
 });
 
@@ -487,6 +498,16 @@ async function loadMeeting(meetingId, date) {
       document.getElementById('advice-container').innerHTML = data.advice;
     }
 
+    // Load tasks
+    if (data.tasks) {
+      document.getElementById('tasks-container').innerHTML = data.tasks;
+    }
+
+    // Track loaded meeting for regeneration
+    loadedMeetingId = meetingId;
+    loadedMeetingDate = date;
+    document.getElementById('regenerate-btn').classList.remove('hidden');
+
     showLoadStatus(`Loaded meeting: ${meetingId} (${date})`, 'success');
     setTimeout(() => loadModal.classList.add('hidden'), 1500);
   } catch (err) {
@@ -502,8 +523,60 @@ function showLoadStatus(message, type) {
   loadStatus.classList.remove('hidden');
 }
 
+// ===================== REGENERATE =====================
+const regenerateBtn = document.getElementById('regenerate-btn');
+
+regenerateBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!loadedMeetingId || !loadedMeetingDate) return;
+
+  regenerateBtn.disabled = true;
+  regenerateBtn.classList.add('loading');
+  regenerateBtn.textContent = '\u21BB Regenerating...';
+
+  try {
+    const res = await fetch('/api/meetings/regenerate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId: loadedMeetingId, date: loadedMeetingDate }),
+    });
+
+    const data = await res.json();
+
+    if (res.ok) {
+      // Update all popups with regenerated content
+      if (data.summary) {
+        summaryContainer.innerHTML = data.summary;
+      }
+      if (data.advice) {
+        document.getElementById('advice-container').innerHTML = data.advice;
+      }
+      if (data.tasks) {
+        document.getElementById('tasks-container').innerHTML = data.tasks;
+      }
+      if (data.diagram) {
+        await renderDiagram(data.diagram);
+      }
+      regenerateBtn.textContent = '\u21BB Saved!';
+      setTimeout(() => {
+        regenerateBtn.textContent = '\u21BB Regenerate All';
+      }, 2000);
+    } else {
+      alert(data.error || 'Failed to regenerate');
+      regenerateBtn.textContent = '\u21BB Regenerate All';
+    }
+  } catch (err) {
+    alert('Network error: ' + err.message);
+    regenerateBtn.textContent = '\u21BB Regenerate All';
+  } finally {
+    regenerateBtn.disabled = false;
+    regenerateBtn.classList.remove('loading');
+  }
+});
+
 // ===================== FLOATING POPUPS =====================
 const widgetMap = {
+  'widget-btn-tasks': 'popup-tasks',
   'widget-btn-suggestions': 'popup-suggestions',
   'widget-btn-summary': 'popup-summary',
   'widget-btn-transcript': 'popup-transcript',

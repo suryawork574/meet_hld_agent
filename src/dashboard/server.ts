@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import { resetDiagram, getPreviousDiagram } from '../analysis/diagram-generator.js';
+import { resetDiagram, getPreviousDiagram, generateDiagram, generateSummary, generateAdvice, generateTasks } from '../analysis/diagram-generator.js';
 import { saveMeetingToGCS, loadMeetingFromGCS, listMeetingsFromGCS, type MeetingData } from '../storage/gcs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,8 +19,7 @@ const io = new SocketIOServer(server, {
 // Parse JSON bodies
 app.use(express.json());
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
+// ===== ALL API ROUTES BEFORE STATIC FILES =====
 
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'running', diagram: getPreviousDiagram() });
@@ -53,6 +52,7 @@ app.post('/api/meetings/save', async (req, res) => {
       summary: meetingData.summary,
       diagram: meetingData.diagram,
       advice: meetingData.advice,
+      tasks: meetingData.tasks,
       savedAt: new Date().toISOString(),
     };
 
@@ -103,6 +103,82 @@ app.get('/api/meetings', async (_req, res) => {
     res.status(500).json({ error: 'Failed to list meetings' });
   }
 });
+
+// Regenerate content for a loaded meeting and save back to GCS
+app.post('/api/meetings/regenerate', async (req, res) => {
+  try {
+    const { meetingId, date } = req.body;
+    if (!meetingId || !date) {
+      res.status(400).json({ error: 'meetingId and date are required' });
+      return;
+    }
+    if (!config.gcsBucket) {
+      res.status(500).json({ error: 'GCS_BUCKET_NAME not configured' });
+      return;
+    }
+
+    // Load existing meeting from GCS
+    const existing = await loadMeetingFromGCS(meetingId as string, date as string);
+    if (!existing) {
+      res.status(404).json({ error: 'Meeting not found' });
+      return;
+    }
+
+    // Build full transcript text
+    const transcriptText = existing.transcript
+      .map(e => e.text)
+      .join(' ');
+
+    if (!transcriptText || transcriptText.trim().length < 20) {
+      res.status(400).json({ error: 'Not enough transcript data to regenerate' });
+      return;
+    }
+
+    logger.info({ meetingId, date, textLength: transcriptText.length }, 'Regenerating content for loaded meeting');
+
+    // Regenerate all content in parallel
+    const [diagram, summary, advice, tasks] = await Promise.all([
+      generateDiagram(transcriptText),
+      generateSummary(transcriptText),
+      generateAdvice(transcriptText),
+      generateTasks(transcriptText),
+    ]);
+
+    // Build updated meeting data
+    const updated: MeetingData = {
+      ...existing,
+      diagram: diagram || existing.diagram,
+      summary: summary || existing.summary,
+      advice: advice || existing.advice,
+      tasks: tasks || existing.tasks,
+      savedAt: new Date().toISOString(),
+    };
+
+    // Save back to GCS
+    await saveMeetingToGCS(updated);
+    logger.info({ meetingId, date }, 'Regenerated meeting data saved to GCS');
+
+    // Emit updates to all connected dashboard clients
+    if (diagram) io.emit('diagram:update', diagram);
+    if (summary) io.emit('summary:update', summary);
+    if (advice) io.emit('advice:update', advice);
+    if (tasks) io.emit('tasks:update', tasks);
+
+    res.json({
+      success: true,
+      diagram: updated.diagram,
+      summary: updated.summary,
+      advice: updated.advice,
+      tasks: updated.tasks,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to regenerate meeting content');
+    res.status(500).json({ error: 'Failed to regenerate content' });
+  }
+});
+
+// ===== STATIC FILES AFTER API ROUTES =====
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -156,6 +232,10 @@ export function emitAdviceUpdate(adviceHtml: string) {
   io.emit('advice:update', adviceHtml);
 }
 
+export function emitTasksUpdate(tasksHtml: string) {
+  io.emit('tasks:update', tasksHtml);
+}
+
 export function emitStatus(status: string) {
   io.emit('status', status);
 }
@@ -176,6 +256,7 @@ let getMeetingDataCallback: (() => {
   summary: string;
   diagram: string;
   advice: string;
+  tasks: string;
 }) | null = null;
 
 export function onGetMeetingData(callback: typeof getMeetingDataCallback) {

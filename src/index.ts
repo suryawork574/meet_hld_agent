@@ -5,8 +5,8 @@ import { GeminiLiveClient } from './gemini/client.js';
 import { TranscriptBuffer } from './analysis/transcript-buffer.js';
 import { detectDesignDiscussion } from './analysis/design-detector.js';
 import { detectVoiceCommand } from './analysis/voice-command-detector.js';
-import { generateDiagram, generateSummary, generateAdvice, getPreviousDiagram } from './analysis/diagram-generator.js';
-import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData } from './dashboard/server.js';
+import { generateDiagram, generateSummary, generateAdvice, generateTasks, getPreviousDiagram } from './analysis/diagram-generator.js';
+import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitTasksUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData } from './dashboard/server.js';
 
 async function main() {
   // Validate configuration
@@ -29,6 +29,7 @@ async function main() {
   let diagramGenerationInProgress = false;
   let latestSummary = '';
   let latestAdvice = '';
+  let latestTasks = '';
 
   // Voice command detection — keep a sliding window of recent transcript chunks
   const recentChunks: string[] = [];
@@ -42,6 +43,7 @@ async function main() {
     summary: latestSummary,
     diagram: getPreviousDiagram(),
     advice: latestAdvice,
+    tasks: latestTasks,
   }));
 
   // Handle verbatim transcripts from inputAudioTranscription
@@ -95,11 +97,12 @@ async function main() {
     try {
       const recentText = transcriptBuffer.getRecentText(120000);
 
-      // Generate diagram, summary, and advice in parallel
-      const [diagram, summary, advice] = await Promise.all([
+      // Generate diagram, summary, advice, and tasks in parallel
+      const [diagram, summary, advice, tasks] = await Promise.all([
         generateDiagram(recentText),
         generateSummary(recentText),
         generateAdvice(recentText),
+        generateTasks(recentText),
       ]);
 
       if (diagram) {
@@ -115,6 +118,11 @@ async function main() {
         latestAdvice = advice;
         emitAdviceUpdate(advice);
         logger.info('Advice updated and sent to dashboard');
+      }
+      if (tasks) {
+        latestTasks = tasks;
+        emitTasksUpdate(tasks);
+        logger.info('Tasks updated and sent to dashboard');
       }
     } catch (err) {
       logger.error({ err }, 'Failed to generate diagram/summary');
@@ -139,15 +147,17 @@ async function main() {
       }
       logger.info({ textLength: fullText.length, instruction }, 'Voice command diagram generation');
 
-      const [diagram, summary, advice] = await Promise.all([
+      const [diagram, summary, advice, tasks] = await Promise.all([
         generateDiagram(fullText, instruction),
         generateSummary(fullText),
         generateAdvice(fullText),
+        generateTasks(fullText),
       ]);
 
       if (diagram) { emitDiagramUpdate(diagram); }
       if (summary) { latestSummary = summary; emitSummaryUpdate(summary); }
       if (advice) { latestAdvice = advice; emitAdviceUpdate(advice); }
+      if (tasks) { latestTasks = tasks; emitTasksUpdate(tasks); }
     } catch (err) {
       logger.error({ err }, 'Failed voice command diagram generation');
     } finally {
@@ -170,15 +180,17 @@ async function main() {
       }
       logger.info({ textLength: fullText.length, suggestion }, 'Manual diagram generation with full session context');
 
-      const [diagram, summary, advice] = await Promise.all([
+      const [diagram, summary, advice, tasks] = await Promise.all([
         generateDiagram(fullText, suggestion),
         generateSummary(fullText),
         generateAdvice(fullText),
+        generateTasks(fullText),
       ]);
 
       if (diagram) { emitDiagramUpdate(diagram); }
       if (summary) { latestSummary = summary; emitSummaryUpdate(summary); }
       if (advice) { latestAdvice = advice; emitAdviceUpdate(advice); }
+      if (tasks) { latestTasks = tasks; emitTasksUpdate(tasks); }
     } catch (err) {
       logger.error({ err }, 'Failed manual diagram generation');
     } finally {
@@ -208,6 +220,11 @@ async function main() {
   logger.info('Starting audio capture server on port 3001...');
   logger.info('Waiting for Chrome extension to connect...');
   emitStatus('Waiting for Extension');
+
+  audioCapture.onStop(() => {
+    logger.info('Extension stopped capture — recordings cleaned up');
+    emitStatus('Capture Stopped');
+  });
 
   await audioCapture.startCapture((base64Chunk) => {
     geminiClient.sendAudioChunk(base64Chunk);
