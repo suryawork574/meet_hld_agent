@@ -47,8 +47,9 @@
 2. **Transcribes** the conversation in real-time using Gemini Live API
 3. **Detects** system design discussions using keyword heuristics + AI-flagging
 4. **Generates** live Mermaid.js architecture diagrams automatically
-5. **Displays** everything on a real-time web dashboard
-6. **Saves** meeting artifacts (transcript, diagrams, summaries) to Google Cloud Storage
+5. **Accepts voice commands** — participants can say *"Hey HLD Agent, add a reporting service with OLAP database"* and the diagram updates live
+6. **Displays** everything on a real-time web dashboard
+7. **Saves** meeting artifacts (transcript, diagrams, summaries) to Google Cloud Storage
 
 ---
 
@@ -140,7 +141,46 @@ When design discussion is detected, three parallel requests are made to **Gemini
 
 ---
 
-## Slide 9: Real-Time Dashboard
+## Slide 9: Live Voice Commands - "Hey HLD Agent"
+
+### The Problem
+During a meeting, manually clicking buttons to update diagrams breaks the discussion flow.
+
+### The Solution
+Participants can speak directly to the agent during the meeting:
+
+> *"Hey HLD Agent, can you update the diagram to add an extra service to generate reports using OLAP database"*
+
+### How It Works
+1. **Trigger Detection** — The system continuously monitors the transcript for wake phrases:
+   - "Hey HLD Agent", "Hey Agent", "Hey Diagram Agent", etc.
+2. **Instruction Extraction** — Everything after the trigger phrase is extracted as the instruction
+   - E.g., *"add an extra service to generate reports using OLAP database"*
+3. **Diagram Update** — The instruction is sent to Gemini REST API along with the full session transcript
+   - Gemini updates the existing diagram, preserving current components and adding new ones per the instruction
+4. **Live Feedback** — The dashboard shows:
+   - A green banner: "Voice Command Detected" with the instruction text
+   - The transcript highlights the voice command entry
+   - The diagram auto-updates within seconds
+   - Banner shows "Done!" when complete
+
+### Example Voice Commands
+| Voice Command | Action |
+|--------------|--------|
+| *"Hey HLD Agent, add a Redis cache between the API gateway and the database"* | Adds a cache layer to the diagram |
+| *"Hey Agent, replace Kafka with RabbitMQ"* | Swaps the message broker component |
+| *"Hey HLD Agent, add a reporting service that reads from an OLAP database"* | Adds reporting service + OLAP DB nodes |
+| *"Hey Agent, show async communication between order service and notification service"* | Updates edge to dashed async arrow |
+| *"Hey HLD Agent, split the monolith into user service and payment service"* | Refactors the architecture diagram |
+
+### Safety
+- **10-second cooldown** between voice commands to prevent accidental triggers
+- **Minimum instruction length** required (>10 chars) to avoid false positives
+- Commands are logged in the transcript with a special voice command tag
+
+---
+
+## Slide 10: Real-Time Dashboard
 
 The web dashboard provides:
 
@@ -164,9 +204,10 @@ The web dashboard provides:
 | Real-time Transcription | Live speech-to-text using Gemini Live API |
 | Auto Design Detection | Keyword heuristic + AI-based detection of design discussions |
 | Live Diagram Generation | Automatic Mermaid.js diagrams updated as discussion evolves |
+| Voice Commands | Say *"Hey HLD Agent, add a cache layer"* — diagram updates live from voice |
 | Meeting Summaries | AI-generated summaries of key discussion points |
 | Architecture Advice | Context-aware recommendations and best practices |
-| Manual Diagram Control | Users can trigger updates with custom suggestions |
+| Manual Diagram Control | Users can trigger updates with custom suggestions via dashboard |
 | Meeting Persistence | Save/load meeting data to/from Google Cloud Storage |
 | Cloud Deployment | Dockerized and deployable to GCP Cloud Run |
 
@@ -203,7 +244,10 @@ The web dashboard provides:
    - Transcript appears on the left
    - Mermaid.js diagram auto-generates on the right
    - Summary and advice panels update
-7. Optionally save the meeting data to GCS for future reference
+7. **Use voice commands** to refine the diagram during the meeting:
+   - Say: *"Hey HLD Agent, add a reporting service connected to an OLAP database"*
+   - Watch the green banner appear and diagram update live
+8. Optionally save the meeting data to GCS for future reference
 
 ---
 

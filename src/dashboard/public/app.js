@@ -114,16 +114,66 @@ socket.on('transcript', (data) => {
   addTranscriptEntry(data.text, data.isDesign, data.timestamp);
 });
 
+// Voice command handling
+const voiceBanner = document.getElementById('voice-command-banner');
+const voiceText = document.getElementById('voice-command-text');
+const voiceStatus = document.getElementById('voice-command-status');
+let voiceBannerTimeout = null;
+
+socket.on('voiceCommand', (data) => {
+  // Show the voice command banner
+  voiceText.textContent = `"${data.instruction}"`;
+  voiceStatus.textContent = 'Updating diagram...';
+  voiceBanner.classList.remove('hidden', 'done');
+
+  // Clear any existing timeout
+  if (voiceBannerTimeout) clearTimeout(voiceBannerTimeout);
+
+  // Also add it to transcript as a special entry
+  addVoiceCommandEntry(data.trigger, data.instruction, data.timestamp);
+
+  // Listen for the diagram update to mark completion
+  socket.once('diagram:update', () => {
+    voiceStatus.textContent = 'Done!';
+    voiceBanner.classList.add('done');
+    voiceBannerTimeout = setTimeout(() => {
+      voiceBanner.classList.add('hidden');
+    }, 8000);
+  });
+
+  // Timeout fallback
+  setTimeout(() => {
+    if (!voiceBanner.classList.contains('done')) {
+      voiceStatus.textContent = 'Processing...';
+    }
+  }, 15000);
+});
+
+function addVoiceCommandEntry(trigger, instruction, timestamp) {
+  entryCount++;
+  transcriptCount.textContent = `${entryCount} entries`;
+
+  const entry = document.createElement('div');
+  entry.className = 'transcript-entry voice-command';
+
+  const time = new Date(timestamp).toLocaleTimeString();
+  entry.innerHTML = `
+    <div class="time">${time}</div>
+    <div><span class="voice-tag">&#127908; VOICE COMMAND</span> ${escapeHtml(instruction)}</div>
+  `;
+
+  transcriptContainer.appendChild(entry);
+  transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+}
+
 socket.on('summary:update', (summaryHtml) => {
   summaryContainer.innerHTML = summaryHtml;
 });
 
 socket.on('advice:update', (adviceHtml) => {
-  const advicePanel = document.getElementById('advice-panel');
   const adviceContainer = document.getElementById('advice-container');
   if (adviceHtml) {
     adviceContainer.innerHTML = adviceHtml;
-    advicePanel.classList.remove('hidden');
   }
 });
 
@@ -434,10 +484,7 @@ async function loadMeeting(meetingId, date) {
 
     // Load advice
     if (data.advice) {
-      const advicePanel = document.getElementById('advice-panel');
-      const adviceContainer = document.getElementById('advice-container');
-      adviceContainer.innerHTML = data.advice;
-      advicePanel.classList.remove('hidden');
+      document.getElementById('advice-container').innerHTML = data.advice;
     }
 
     showLoadStatus(`Loaded meeting: ${meetingId} (${date})`, 'success');
@@ -454,3 +501,54 @@ function showLoadStatus(message, type) {
   loadStatus.className = `save-status ${type}`;
   loadStatus.classList.remove('hidden');
 }
+
+// ===================== FLOATING POPUPS =====================
+const widgetMap = {
+  'widget-btn-suggestions': 'popup-suggestions',
+  'widget-btn-summary': 'popup-summary',
+  'widget-btn-transcript': 'popup-transcript',
+};
+
+let activePopup = null;
+
+Object.entries(widgetMap).forEach(([btnId, popupId]) => {
+  const btn = document.getElementById(btnId);
+  const popup = document.getElementById(popupId);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+
+    if (activePopup === popupId) {
+      // Close current
+      popup.classList.add('hidden');
+      btn.classList.remove('active');
+      activePopup = null;
+    } else {
+      // Close any open popup
+      closeAllPopups();
+      // Open this one
+      popup.classList.remove('hidden');
+      btn.classList.add('active');
+      activePopup = popupId;
+    }
+  });
+});
+
+function closeAllPopups() {
+  Object.entries(widgetMap).forEach(([btnId, popupId]) => {
+    document.getElementById(popupId).classList.add('hidden');
+    document.getElementById(btnId).classList.remove('active');
+  });
+  activePopup = null;
+}
+
+// Close popup when clicking anywhere else
+document.addEventListener('click', (e) => {
+  if (!activePopup) return;
+  const popup = document.getElementById(activePopup);
+  const isInsidePopup = popup.contains(e.target);
+  const isWidgetBtn = e.target.closest('.widget-btn');
+  if (!isInsidePopup && !isWidgetBtn) {
+    closeAllPopups();
+  }
+});

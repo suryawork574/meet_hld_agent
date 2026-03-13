@@ -4,8 +4,9 @@ import { AudioCapture } from './meet/audio-capture.js';
 import { GeminiLiveClient } from './gemini/client.js';
 import { TranscriptBuffer } from './analysis/transcript-buffer.js';
 import { detectDesignDiscussion } from './analysis/design-detector.js';
+import { detectVoiceCommand } from './analysis/voice-command-detector.js';
 import { generateDiagram, generateSummary, generateAdvice, getPreviousDiagram } from './analysis/diagram-generator.js';
-import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitStatus, onManualDiagramUpdate, onGetMeetingData } from './dashboard/server.js';
+import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData } from './dashboard/server.js';
 
 async function main() {
   // Validate configuration
@@ -29,6 +30,12 @@ async function main() {
   let latestSummary = '';
   let latestAdvice = '';
 
+  // Voice command detection — keep a sliding window of recent transcript chunks
+  const recentChunks: string[] = [];
+  const MAX_VOICE_CHUNKS = 10; // combine last 10 chunks for command detection (handles fragmented speech)
+  let lastVoiceCommandTime = 0;
+  const VOICE_COMMAND_COOLDOWN_MS = 10000; // 10s cooldown between voice commands
+
   // Register callback so the save endpoint can access current meeting state
   onGetMeetingData(() => ({
     transcript: transcriptBuffer.getAll(),
@@ -41,6 +48,27 @@ async function main() {
   geminiClient.on('transcript', (text: string) => {
     transcriptBuffer.add(text, false);
     emitTranscript(text, false);
+
+    // --- Voice command detection ---
+    recentChunks.push(text);
+    if (recentChunks.length > MAX_VOICE_CHUNKS) recentChunks.shift();
+
+    const now = Date.now();
+    if (now - lastVoiceCommandTime > VOICE_COMMAND_COOLDOWN_MS) {
+      const combined = recentChunks.join(' ');
+      // Log combined text so we can see what speech-to-text produces
+      if (combined.toLowerCase().includes('agent') || combined.toLowerCase().includes('hld') || combined.toLowerCase().includes('gent') || combined.toLowerCase().includes('ajan')) {
+        logger.info({ combinedText: combined.substring(0, 300) }, 'Potential voice command text detected — checking...');
+      }
+      const voiceCmd = detectVoiceCommand(combined);
+      if (voiceCmd.detected) {
+        lastVoiceCommandTime = now;
+        recentChunks.length = 0; // clear so we don't re-detect
+        logger.info({ instruction: voiceCmd.instruction }, 'Voice command received — triggering diagram update');
+        emitVoiceCommand(voiceCmd.triggerPhrase, voiceCmd.instruction);
+        triggerVoiceCommandUpdate(voiceCmd.instruction);
+      }
+    }
 
     // Check design keywords against accumulated transcript (last 2 min), not just this fragment
     const recentText = transcriptBuffer.getRecentText(120000);
@@ -90,6 +118,38 @@ async function main() {
       }
     } catch (err) {
       logger.error({ err }, 'Failed to generate diagram/summary');
+    } finally {
+      diagramGenerationInProgress = false;
+    }
+  }
+
+  // Voice command update — triggered by "Hey HLD agent, ..." from the meeting audio
+  // Uses full session transcript + the spoken instruction as the suggestion
+  async function triggerVoiceCommandUpdate(instruction: string) {
+    if (diagramGenerationInProgress) {
+      logger.info('Voice command received but generation already in progress');
+      return;
+    }
+    diagramGenerationInProgress = true;
+    try {
+      const fullText = transcriptBuffer.getFullTranscript();
+      if (!fullText || fullText.trim().length < 20) {
+        logger.warn('Not enough transcript for voice command diagram update');
+        return;
+      }
+      logger.info({ textLength: fullText.length, instruction }, 'Voice command diagram generation');
+
+      const [diagram, summary, advice] = await Promise.all([
+        generateDiagram(fullText, instruction),
+        generateSummary(fullText),
+        generateAdvice(fullText),
+      ]);
+
+      if (diagram) { emitDiagramUpdate(diagram); }
+      if (summary) { latestSummary = summary; emitSummaryUpdate(summary); }
+      if (advice) { latestAdvice = advice; emitAdviceUpdate(advice); }
+    } catch (err) {
+      logger.error({ err }, 'Failed voice command diagram generation');
     } finally {
       diagramGenerationInProgress = false;
     }

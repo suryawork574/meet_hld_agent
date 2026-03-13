@@ -10,13 +10,24 @@ function setStatus(text, state) {
 function setRecording(isRecording) {
   startBtn.disabled = isRecording;
   stopBtn.disabled = !isRecording;
+  startBtn.style.display = isRecording ? 'none' : 'block';
+  stopBtn.style.display = isRecording ? 'block' : 'none';
 }
 
-// Check current state on popup open
+// Check current state on popup open — uses persisted session storage
 chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
+  if (chrome.runtime.lastError) {
+    // Service worker not ready yet, default to idle
+    setStatus('Idle — Not capturing', 'idle');
+    setRecording(false);
+    return;
+  }
   if (response?.capturing) {
     setStatus('Recording...', 'recording');
     setRecording(true);
+  } else {
+    setStatus('Idle — Not capturing', 'idle');
+    setRecording(false);
   }
 });
 
@@ -40,6 +51,11 @@ startBtn.addEventListener('click', async () => {
   }
 
   chrome.runtime.sendMessage({ type: 'START_CAPTURE', tabId: tab.id }, (response) => {
+    if (chrome.runtime.lastError) {
+      setStatus(`Error: ${chrome.runtime.lastError.message}`, 'error');
+      startBtn.disabled = false;
+      return;
+    }
     if (response?.error) {
       setStatus(`Error: ${response.error}`, 'error');
       startBtn.disabled = false;

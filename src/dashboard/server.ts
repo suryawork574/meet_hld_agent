@@ -160,6 +160,10 @@ export function emitStatus(status: string) {
   io.emit('status', status);
 }
 
+export function emitVoiceCommand(trigger: string, instruction: string) {
+  io.emit('voiceCommand', { trigger, instruction, timestamp: Date.now() });
+}
+
 let onManualUpdateCallback: ((suggestion: string) => void) | null = null;
 
 export function onManualDiagramUpdate(callback: (suggestion: string) => void) {

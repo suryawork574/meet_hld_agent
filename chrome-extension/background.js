@@ -1,18 +1,17 @@
 // Background service worker for tab audio capture
-// Triggered manually via popup Start/Stop buttons
-
-let capturing = false;
+// Uses chrome.storage.session to persist state across service worker restarts
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Messages from popup (have tabId or specific types)
   if (message.type === 'START_CAPTURE' && message.tabId) {
-    if (capturing) {
-      sendResponse({ error: 'Already capturing' });
-      return false;
-    }
-    startCapture(message.tabId)
-      .then(() => sendResponse({ success: true }))
-      .catch((e) => sendResponse({ error: e.message }));
+    getState().then((state) => {
+      if (state.capturing) {
+        sendResponse({ error: 'Already capturing' });
+        return;
+      }
+      startCapture(message.tabId)
+        .then(() => sendResponse({ success: true }))
+        .catch((e) => sendResponse({ error: e.message }));
+    });
     return true; // async response
   }
 
@@ -23,20 +22,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'GET_STATUS') {
-    sendResponse({ capturing });
-    return false;
+    getState().then((state) => {
+      sendResponse({ capturing: state.capturing, tabId: state.tabId });
+    });
+    return true; // async response
   }
 
   // Status from offscreen — no response needed
   if (message.type === 'CAPTURE_STATUS') {
     console.log('[BG] Capture status:', message.status);
     if (message.status === 'error' || message.status === 'stopped') {
-      capturing = false;
+      setState({ capturing: false, tabId: null });
     }
   }
 
-  return false; // no async response needed
+  return false;
 });
+
+async function getState() {
+  try {
+    const result = await chrome.storage.session.get(['capturing', 'tabId']);
+    return {
+      capturing: result.capturing || false,
+      tabId: result.tabId || null,
+    };
+  } catch {
+    return { capturing: false, tabId: null };
+  }
+}
+
+async function setState(state) {
+  try {
+    await chrome.storage.session.set(state);
+  } catch (e) {
+    console.warn('[BG] Failed to persist state:', e);
+  }
+}
 
 async function startCapture(tabId) {
   console.log('[BG] Starting capture for tab:', tabId);
@@ -71,11 +92,11 @@ async function startCapture(tabId) {
     streamId: streamId,
   });
 
-  capturing = true;
+  await setState({ capturing: true, tabId: tabId });
 }
 
-function stopCapture() {
+async function stopCapture() {
   console.log('[BG] Stopping capture');
   chrome.runtime.sendMessage({ type: 'OFFSCREEN_STOP' });
-  capturing = false;
+  await setState({ capturing: false, tabId: null });
 }
