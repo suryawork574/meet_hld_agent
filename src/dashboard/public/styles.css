@@ -619,6 +619,7 @@ main {
   font-size: 0.85rem;
   outline: none;
   transition: border-color 0.2s;
+  color-scheme: dark;
 }
 
 .form-group input:focus {
