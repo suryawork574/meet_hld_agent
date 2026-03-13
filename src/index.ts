@@ -4,8 +4,8 @@ import { AudioCapture } from './meet/audio-capture.js';
 import { GeminiLiveClient } from './gemini/client.js';
 import { TranscriptBuffer } from './analysis/transcript-buffer.js';
 import { detectDesignDiscussion } from './analysis/design-detector.js';
-import { generateDiagram, generateSummary, generateAdvice } from './analysis/diagram-generator.js';
-import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitStatus, onManualDiagramUpdate } from './dashboard/server.js';
+import { generateDiagram, generateSummary, generateAdvice, getPreviousDiagram } from './analysis/diagram-generator.js';
+import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitStatus, onManualDiagramUpdate, onGetMeetingData } from './dashboard/server.js';
 
 async function main() {
   // Validate configuration
@@ -26,6 +26,16 @@ async function main() {
 
   let lastDiagramGeneration = 0;
   let diagramGenerationInProgress = false;
+  let latestSummary = '';
+  let latestAdvice = '';
+
+  // Register callback so the save endpoint can access current meeting state
+  onGetMeetingData(() => ({
+    transcript: transcriptBuffer.getAll(),
+    summary: latestSummary,
+    diagram: getPreviousDiagram(),
+    advice: latestAdvice,
+  }));
 
   // Handle verbatim transcripts from inputAudioTranscription
   geminiClient.on('transcript', (text: string) => {
@@ -69,10 +79,12 @@ async function main() {
         logger.info('Diagram updated and sent to dashboard');
       }
       if (summary) {
+        latestSummary = summary;
         emitSummaryUpdate(summary);
         logger.info('Summary updated and sent to dashboard');
       }
       if (advice) {
+        latestAdvice = advice;
         emitAdviceUpdate(advice);
         logger.info('Advice updated and sent to dashboard');
       }
@@ -105,8 +117,8 @@ async function main() {
       ]);
 
       if (diagram) { emitDiagramUpdate(diagram); }
-      if (summary) { emitSummaryUpdate(summary); }
-      if (advice) { emitAdviceUpdate(advice); }
+      if (summary) { latestSummary = summary; emitSummaryUpdate(summary); }
+      if (advice) { latestAdvice = advice; emitAdviceUpdate(advice); }
     } catch (err) {
       logger.error({ err }, 'Failed manual diagram generation');
     } finally {

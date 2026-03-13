@@ -21,6 +21,8 @@
       <div class="status-bar">
         <span id="connection-status" class="status disconnected">Disconnected</span>
         <span id="meet-status" class="status">-</span>
+        <button id="save-meeting-btn" class="btn-save">Save Meeting</button>
+        <button id="load-meeting-btn" class="btn-load">Load Meeting</button>
         <button id="update-diagram-btn" class="btn-update">Update Diagram</button>
         <div id="suggestion-modal" class="modal hidden">
           <div class="modal-content">
@@ -30,6 +32,59 @@
             <div class="modal-actions">
               <button id="suggestion-cancel" class="btn-modal cancel">Cancel</button>
               <button id="suggestion-submit" class="btn-modal submit">Generate</button>
+            </div>
+          </div>
+        </div>
+        <!-- Save Meeting Modal -->
+        <div id="save-modal" class="modal hidden">
+          <div class="modal-content">
+            <h3>Save Meeting to Cloud</h3>
+            <p>Save transcript, diagram, summary, and suggestions to Google Cloud Storage.</p>
+            <div class="form-group">
+              <label for="save-meeting-id">Meeting ID</label>
+              <input type="text" id="save-meeting-id" placeholder="e.g., design-review-auth-service" />
+            </div>
+            <div class="form-group">
+              <label for="save-meeting-date">Date</label>
+              <input type="date" id="save-meeting-date" />
+            </div>
+            <div class="modal-actions">
+              <button id="save-cancel" class="btn-modal cancel">Cancel</button>
+              <button id="save-submit" class="btn-modal submit">Save</button>
+            </div>
+            <div id="save-status" class="save-status hidden"></div>
+          </div>
+        </div>
+        <!-- Load Meeting Modal -->
+        <div id="load-modal" class="modal hidden">
+          <div class="modal-content modal-content-wide">
+            <h3>Load Previous Meeting</h3>
+            <p>Enter meeting ID and date, or select from saved meetings.</p>
+            <div class="load-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="load-meeting-id">Meeting ID</label>
+                  <input type="text" id="load-meeting-id" placeholder="e.g., design-review-auth-service" />
+                </div>
+                <div class="form-group">
+                  <label for="load-meeting-date">Date</label>
+                  <input type="date" id="load-meeting-date" />
+                </div>
+                <button id="load-fetch-btn" class="btn-modal submit">Load</button>
+              </div>
+            </div>
+            <div id="load-status" class="save-status hidden"></div>
+            <div class="meetings-list-section">
+              <div class="meetings-list-header">
+                <h4>Saved Meetings</h4>
+                <button id="refresh-meetings-btn" class="btn-toggle">Refresh</button>
+              </div>
+              <div id="meetings-list" class="meetings-list">
+                <div class="meetings-placeholder">Click Refresh to load saved meetings...</div>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button id="load-cancel" class="btn-modal cancel">Close</button>
             </div>
           </div>
         </div>

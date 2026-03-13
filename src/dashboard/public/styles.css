@@ -100,6 +100,37 @@ header h1 {
   50% { opacity: 0.6; }
 }
 
+.btn-save {
+  padding: 5px 14px;
+  border: 1px solid rgba(33, 150, 243, 0.5);
+  background: rgba(33, 150, 243, 0.1);
+  color: #2196f3;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  letter-spacing: 0.3px;
+}
+
+.btn-save:hover { background: rgba(33, 150, 243, 0.25); border-color: #2196f3; }
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-load {
+  padding: 5px 14px;
+  border: 1px solid rgba(156, 39, 176, 0.5);
+  background: rgba(156, 39, 176, 0.1);
+  color: #ce93d8;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  letter-spacing: 0.3px;
+}
+
+.btn-load:hover { background: rgba(156, 39, 176, 0.25); border-color: #ce93d8; }
+
 .btn-reset {
   padding: 5px 14px;
   border: 1px solid rgba(244, 67, 54, 0.4);
@@ -598,6 +629,142 @@ main {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Form elements */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.72rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.form-group input[type="text"],
+.form-group input[type="date"] {
+  width: 100%;
+  padding: 9px 12px;
+  background: #10101f;
+  border: 1px solid rgba(124, 124, 255, 0.15);
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+  border-color: rgba(124, 124, 255, 0.5);
+}
+
+.form-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+.form-row .btn-modal {
+  margin-bottom: 12px;
+  height: 38px;
+}
+
+/* Save/Load status */
+.save-status {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.save-status.hidden { display: none; }
+.save-status.success { background: rgba(76, 175, 80, 0.12); color: #4caf50; border: 1px solid rgba(76, 175, 80, 0.25); }
+.save-status.error { background: rgba(244, 67, 54, 0.12); color: #f44336; border: 1px solid rgba(244, 67, 54, 0.25); }
+.save-status.info { background: rgba(33, 150, 243, 0.12); color: #2196f3; border: 1px solid rgba(33, 150, 243, 0.25); }
+
+/* Meetings list */
+.modal-content-wide {
+  width: 580px;
+}
+
+.meetings-list-section {
+  margin-top: 16px;
+}
+
+.meetings-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.meetings-list-header h4 {
+  font-size: 0.8rem;
+  color: #aaa;
+  font-weight: 600;
+}
+
+.meetings-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid rgba(124, 124, 255, 0.1);
+  border-radius: 8px;
+  background: #10101f;
+}
+
+.meetings-placeholder {
+  padding: 20px;
+  text-align: center;
+  color: #555;
+  font-size: 0.8rem;
+}
+
+.meeting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(124, 124, 255, 0.06);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.meeting-item:last-child { border-bottom: none; }
+.meeting-item:hover { background: rgba(124, 124, 255, 0.08); }
+
+.meeting-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meeting-item-id {
+  color: #ce93d8;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.meeting-item-date {
+  color: #666;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.meeting-item-time {
+  color: #555;
+  font-size: 0.68rem;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* Scrollbar */

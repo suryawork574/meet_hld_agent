@@ -139,8 +139,11 @@ socket.on('diagram:update', async (mermaidCode) => {
     return;
   }
 
-  mermaidSource.textContent = mermaidCode;
+  await renderDiagram(mermaidCode);
+});
 
+async function renderDiagram(mermaidCode) {
+  mermaidSource.textContent = mermaidCode;
   try {
     renderCounter++;
     const id = `mermaid-diagram-${renderCounter}`;
@@ -156,7 +159,7 @@ socket.on('diagram:update', async (mermaidCode) => {
     console.error('Mermaid render error:', err);
     mermaidOutput.innerHTML = `<div class="mermaid-placeholder">Diagram rendering error. Check Mermaid syntax.</div>`;
   }
-});
+}
 
 // UI handlers
 resetBtn.addEventListener('click', () => {
@@ -240,4 +243,214 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// ===================== SAVE MEETING =====================
+const saveMeetingBtn = document.getElementById('save-meeting-btn');
+const saveModal = document.getElementById('save-modal');
+const saveMeetingId = document.getElementById('save-meeting-id');
+const saveMeetingDate = document.getElementById('save-meeting-date');
+const saveCancel = document.getElementById('save-cancel');
+const saveSubmit = document.getElementById('save-submit');
+const saveStatus = document.getElementById('save-status');
+
+saveMeetingBtn.addEventListener('click', () => {
+  // Pre-fill date with today
+  saveMeetingDate.value = new Date().toISOString().split('T')[0];
+  saveMeetingId.value = '';
+  saveStatus.classList.add('hidden');
+  saveModal.classList.remove('hidden');
+  saveMeetingId.focus();
+});
+
+saveCancel.addEventListener('click', () => {
+  saveModal.classList.add('hidden');
+});
+
+saveModal.addEventListener('click', (e) => {
+  if (e.target === saveModal) saveModal.classList.add('hidden');
+});
+
+saveSubmit.addEventListener('click', async () => {
+  const meetingId = saveMeetingId.value.trim();
+  const date = saveMeetingDate.value;
+
+  if (!meetingId) {
+    showSaveStatus('Please enter a Meeting ID', 'error');
+    return;
+  }
+  if (!date) {
+    showSaveStatus('Please select a date', 'error');
+    return;
+  }
+
+  saveSubmit.disabled = true;
+  saveSubmit.textContent = 'Saving...';
+
+  try {
+    const res = await fetch('/api/meetings/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId, date }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      showSaveStatus(`Saved successfully! Path: ${data.path}`, 'success');
+      setTimeout(() => saveModal.classList.add('hidden'), 2000);
+    } else {
+      showSaveStatus(data.error || 'Failed to save', 'error');
+    }
+  } catch (err) {
+    showSaveStatus('Network error: ' + err.message, 'error');
+  } finally {
+    saveSubmit.disabled = false;
+    saveSubmit.textContent = 'Save';
+  }
+});
+
+function showSaveStatus(message, type) {
+  saveStatus.textContent = message;
+  saveStatus.className = `save-status ${type}`;
+  saveStatus.classList.remove('hidden');
+}
+
+// ===================== LOAD MEETING =====================
+const loadMeetingBtn = document.getElementById('load-meeting-btn');
+const loadModal = document.getElementById('load-modal');
+const loadMeetingId = document.getElementById('load-meeting-id');
+const loadMeetingDate = document.getElementById('load-meeting-date');
+const loadFetchBtn = document.getElementById('load-fetch-btn');
+const loadCancel = document.getElementById('load-cancel');
+const loadStatus = document.getElementById('load-status');
+const meetingsList = document.getElementById('meetings-list');
+const refreshMeetingsBtn = document.getElementById('refresh-meetings-btn');
+
+loadMeetingBtn.addEventListener('click', () => {
+  loadMeetingId.value = '';
+  loadMeetingDate.value = '';
+  loadStatus.classList.add('hidden');
+  loadModal.classList.remove('hidden');
+});
+
+loadCancel.addEventListener('click', () => {
+  loadModal.classList.add('hidden');
+});
+
+loadModal.addEventListener('click', (e) => {
+  if (e.target === loadModal) loadModal.classList.add('hidden');
+});
+
+loadFetchBtn.addEventListener('click', async () => {
+  const meetingId = loadMeetingId.value.trim();
+  const date = loadMeetingDate.value;
+
+  if (!meetingId || !date) {
+    showLoadStatus('Please enter both Meeting ID and Date', 'error');
+    return;
+  }
+
+  await loadMeeting(meetingId, date);
+});
+
+refreshMeetingsBtn.addEventListener('click', async () => {
+  refreshMeetingsBtn.disabled = true;
+  refreshMeetingsBtn.textContent = 'Loading...';
+
+  try {
+    const res = await fetch('/api/meetings');
+    if (!res.ok) {
+      const data = await res.json();
+      meetingsList.innerHTML = `<div class="meetings-placeholder">${data.error || 'Failed to load'}</div>`;
+      return;
+    }
+
+    const meetings = await res.json();
+    if (meetings.length === 0) {
+      meetingsList.innerHTML = '<div class="meetings-placeholder">No saved meetings found.</div>';
+      return;
+    }
+
+    meetingsList.innerHTML = meetings.map(m => `
+      <div class="meeting-item" data-meeting-id="${escapeHtml(m.meetingId)}" data-date="${escapeHtml(m.date)}">
+        <div class="meeting-item-info">
+          <span class="meeting-item-id">${escapeHtml(m.meetingId)}</span>
+          <span class="meeting-item-date">${escapeHtml(m.date)}</span>
+        </div>
+        <span class="meeting-item-time">${m.savedAt ? new Date(m.savedAt).toLocaleString() : ''}</span>
+      </div>
+    `).join('');
+
+    // Add click handlers
+    meetingsList.querySelectorAll('.meeting-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const id = item.dataset.meetingId;
+        const date = item.dataset.date;
+        loadMeeting(id, date);
+      });
+    });
+  } catch (err) {
+    meetingsList.innerHTML = `<div class="meetings-placeholder">Error: ${err.message}</div>`;
+  } finally {
+    refreshMeetingsBtn.disabled = false;
+    refreshMeetingsBtn.textContent = 'Refresh';
+  }
+});
+
+async function loadMeeting(meetingId, date) {
+  showLoadStatus('Loading meeting...', 'info');
+  loadFetchBtn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/meetings/load?meetingId=${encodeURIComponent(meetingId)}&date=${encodeURIComponent(date)}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      showLoadStatus(data.error || 'Failed to load meeting', 'error');
+      return;
+    }
+
+    // Populate the UI with loaded data
+    // Clear current transcript
+    transcriptContainer.innerHTML = '';
+    entryCount = 0;
+
+    // Load transcript entries
+    if (data.transcript && data.transcript.length > 0) {
+      data.transcript.forEach(entry => {
+        addTranscriptEntry(entry.text, entry.isDesign, entry.timestamp);
+      });
+    }
+
+    // Load summary
+    if (data.summary) {
+      summaryContainer.innerHTML = data.summary;
+    }
+
+    // Load diagram
+    if (data.diagram) {
+      await renderDiagram(data.diagram);
+    }
+
+    // Load advice
+    if (data.advice) {
+      const advicePanel = document.getElementById('advice-panel');
+      const adviceContainer = document.getElementById('advice-container');
+      adviceContainer.innerHTML = data.advice;
+      advicePanel.classList.remove('hidden');
+    }
+
+    showLoadStatus(`Loaded meeting: ${meetingId} (${date})`, 'success');
+    setTimeout(() => loadModal.classList.add('hidden'), 1500);
+  } catch (err) {
+    showLoadStatus('Network error: ' + err.message, 'error');
+  } finally {
+    loadFetchBtn.disabled = false;
+  }
+}
+
+function showLoadStatus(message, type) {
+  loadStatus.textContent = message;
+  loadStatus.className = `save-status ${type}`;
+  loadStatus.classList.remove('hidden');
 }
