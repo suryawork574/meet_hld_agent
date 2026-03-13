@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 280px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      margin: 0;
+    }
+    h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      color: #fff;
+    }
+    #status {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .status-idle { background: #2d2d44; color: #aaa; }
+    .status-recording { background: #1b4332; color: #52b788; }
+    .status-error { background: #442d2d; color: #e87171; }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 6px;
+    }
+    #startBtn {
+      background: #4361ee;
+      color: #fff;
+    }
+    #startBtn:hover { background: #3a56d4; }
+    #startBtn:disabled { background: #333; color: #666; cursor: default; }
+    #stopBtn {
+      background: #e63946;
+      color: #fff;
+    }
+    #stopBtn:hover { background: #c1121f; }
+    #stopBtn:disabled { background: #333; color: #666; cursor: default; }
+    .hint {
+      font-size: 11px;
+      color: #888;
+      margin-top: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h3>Meet Audio Capture</h3>
+  <div id="status" class="status-idle">Idle — Not capturing</div>
+  <button id="startBtn">Start Capture</button>
+  <button id="stopBtn" disabled>Stop Capture</button>
+  <div class="hint">Make sure you're on a Google Meet tab</div>
+  <script src="popup.js"></script>
+</body>
+</html>

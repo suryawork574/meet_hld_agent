@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GenAI Meet Diagram - Live System Design</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">&#9670;</span>
+          <h1>GenAI Meet Diagram</h1>
+        </div>
+        <span class="subtitle">Live System Design Visualization</span>
+      </div>
+      <div class="status-bar">
+        <span id="connection-status" class="status disconnected">Disconnected</span>
+        <span id="meet-status" class="status">-</span>
+        <button id="update-diagram-btn" class="btn-update">Update Diagram</button>
+        <div id="suggestion-modal" class="modal hidden">
+          <div class="modal-content">
+            <h3>Update Diagram</h3>
+            <p>Any suggestions for the diagram update? Leave empty to auto-generate.</p>
+            <textarea id="suggestion-input" placeholder="e.g., Add a Redis cache between API gateway and database, show async communication with Kafka..."></textarea>
+            <div class="modal-actions">
+              <button id="suggestion-cancel" class="btn-modal cancel">Cancel</button>
+              <button id="suggestion-submit" class="btn-modal submit">Generate</button>
+            </div>
+          </div>
+        </div>
+        <button id="reset-btn" class="btn-reset">Reset Diagram</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="diagram-panel">
+        <div class="panel-header">
+          <h2>System Design Diagram</h2>
+          <button id="toggle-code" class="btn-toggle">Show Code</button>
+        </div>
+        <div id="diagram-wrapper">
+          <div class="zoom-controls">
+            <button id="zoom-in" class="zoom-btn" title="Zoom In">+</button>
+            <span id="zoom-level">100%</span>
+            <button id="zoom-out" class="zoom-btn" title="Zoom Out">&minus;</button>
+            <button id="zoom-fit" class="zoom-btn zoom-fit" title="Fit to View">Fit</button>
+          </div>
+          <div id="diagram-container">
+            <div id="mermaid-output" class="mermaid-placeholder">
+              <div class="placeholder-icon">&#9881;</div>
+              <div>Waiting for system design discussion...</div>
+              <div class="placeholder-sub">Start discussing architecture, databases, APIs, etc.</div>
+            </div>
+          </div>
+        </div>
+        <div id="advice-panel" class="advice-panel hidden">
+          <div class="panel-header">
+            <h2>Design Recommendations</h2>
+            <span class="advice-badge">AI Architect</span>
+          </div>
+          <div id="advice-container"></div>
+        </div>
+        <div id="diagram-code" class="code-view hidden">
+          <pre><code id="mermaid-source"></code></pre>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="summary-panel">
+          <div class="panel-header">
+            <h2>Discussion Summary</h2>
+            <div class="live-indicator" id="summary-indicator">
+              <span class="live-dot"></span> Live
+            </div>
+          </div>
+          <div id="summary-container">
+            <div class="summary-placeholder">Summary will appear as the discussion progresses...</div>
+          </div>
+        </div>
+
+        <div class="transcript-panel">
+          <div class="panel-header">
+            <h2>Raw Transcript</h2>
+            <span class="transcript-count" id="transcript-count">0 entries</span>
+          </div>
+          <div id="transcript-container"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

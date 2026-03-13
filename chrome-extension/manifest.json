@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Meet Audio Capture",
+  "version": "1.0.0",
+  "description": "Captures tab audio for AI processing",
+  "permissions": [
+    "tabCapture",
+    "activeTab",
+    "offscreen"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Meet Audio Capture",
+    "default_popup": "popup.html"
+  }
+}
