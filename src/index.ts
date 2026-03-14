@@ -87,6 +87,7 @@ async function main() {
     triggerDiagramGeneration();
   });
 
+  // Real-time: only generate diagram (no summary/advice/tasks)
   async function triggerDiagramGeneration() {
     if (diagramGenerationInProgress) return;
     const now = Date.now();
@@ -96,43 +97,20 @@ async function main() {
     lastDiagramGeneration = now;
     try {
       const recentText = transcriptBuffer.getRecentText(120000);
-
-      // Generate diagram, summary, advice, and tasks in parallel
-      const [diagram, summary, advice, tasks] = await Promise.all([
-        generateDiagram(recentText),
-        generateSummary(recentText),
-        generateAdvice(recentText),
-        generateTasks(recentText),
-      ]);
+      const diagram = await generateDiagram(recentText);
 
       if (diagram) {
         emitDiagramUpdate(diagram);
         logger.info('Diagram updated and sent to dashboard');
       }
-      if (summary) {
-        latestSummary = summary;
-        emitSummaryUpdate(summary);
-        logger.info('Summary updated and sent to dashboard');
-      }
-      if (advice) {
-        latestAdvice = advice;
-        emitAdviceUpdate(advice);
-        logger.info('Advice updated and sent to dashboard');
-      }
-      if (tasks) {
-        latestTasks = tasks;
-        emitTasksUpdate(tasks);
-        logger.info('Tasks updated and sent to dashboard');
-      }
     } catch (err) {
-      logger.error({ err }, 'Failed to generate diagram/summary');
+      logger.error({ err }, 'Failed to generate diagram');
     } finally {
       diagramGenerationInProgress = false;
     }
   }
 
-  // Voice command update — triggered by "Hey HLD agent, ..." from the meeting audio
-  // Uses full session transcript + the spoken instruction as the suggestion
+  // Voice command update — only diagram generation in real-time
   async function triggerVoiceCommandUpdate(instruction: string) {
     if (diagramGenerationInProgress) {
       logger.info('Voice command received but generation already in progress');
@@ -147,17 +125,8 @@ async function main() {
       }
       logger.info({ textLength: fullText.length, instruction }, 'Voice command diagram generation');
 
-      const [diagram, summary, advice, tasks] = await Promise.all([
-        generateDiagram(fullText, instruction),
-        generateSummary(fullText),
-        generateAdvice(fullText),
-        generateTasks(fullText),
-      ]);
-
+      const diagram = await generateDiagram(fullText, instruction);
       if (diagram) { emitDiagramUpdate(diagram); }
-      if (summary) { latestSummary = summary; emitSummaryUpdate(summary); }
-      if (advice) { latestAdvice = advice; emitAdviceUpdate(advice); }
-      if (tasks) { latestTasks = tasks; emitTasksUpdate(tasks); }
     } catch (err) {
       logger.error({ err }, 'Failed voice command diagram generation');
     } finally {
@@ -165,7 +134,7 @@ async function main() {
     }
   }
 
-  // Manual update button — uses full session context, no debounce
+  // Manual update button — only diagram generation
   onManualDiagramUpdate(async (suggestion: string) => {
     if (diagramGenerationInProgress) {
       logger.info('Manual update requested but generation already in progress');
@@ -180,23 +149,56 @@ async function main() {
       }
       logger.info({ textLength: fullText.length, suggestion }, 'Manual diagram generation with full session context');
 
-      const [diagram, summary, advice, tasks] = await Promise.all([
-        generateDiagram(fullText, suggestion),
-        generateSummary(fullText),
-        generateAdvice(fullText),
-        generateTasks(fullText),
-      ]);
-
+      const diagram = await generateDiagram(fullText, suggestion);
       if (diagram) { emitDiagramUpdate(diagram); }
-      if (summary) { latestSummary = summary; emitSummaryUpdate(summary); }
-      if (advice) { latestAdvice = advice; emitAdviceUpdate(advice); }
-      if (tasks) { latestTasks = tasks; emitTasksUpdate(tasks); }
     } catch (err) {
       logger.error({ err }, 'Failed manual diagram generation');
     } finally {
       diagramGenerationInProgress = false;
     }
   });
+
+  // Generate summary, advice, and tasks from full transcript on stop capture
+  async function generatePostCaptureContent() {
+    const fullText = transcriptBuffer.getFullTranscript();
+    if (!fullText || fullText.trim().length < 20) {
+      logger.warn('Not enough transcript for post-capture content generation');
+      return;
+    }
+
+    logger.info({ textLength: fullText.length }, 'Generating summary, advice, and tasks from full transcript...');
+    emitStatus('Generating Summary & Tasks...');
+
+    try {
+      const [summary, advice, tasks] = await Promise.all([
+        generateSummary(fullText),
+        generateAdvice(fullText),
+        generateTasks(fullText),
+      ]);
+
+      if (summary) {
+        latestSummary = summary;
+        emitSummaryUpdate(summary);
+        logger.info('Summary generated and sent to dashboard');
+      }
+      if (advice) {
+        latestAdvice = advice;
+        emitAdviceUpdate(advice);
+        logger.info('Advice generated and sent to dashboard');
+      }
+      if (tasks) {
+        latestTasks = tasks;
+        emitTasksUpdate(tasks);
+        logger.info('Tasks generated and sent to dashboard');
+      }
+
+      emitStatus('Content Ready');
+      logger.info('Post-capture content generation complete');
+    } catch (err) {
+      logger.error({ err }, 'Failed to generate post-capture content');
+      emitStatus('Generation Error');
+    }
+  }
 
   geminiClient.on('error', (err) => {
     logger.error({ err }, 'Gemini client error');
@@ -222,8 +224,9 @@ async function main() {
   emitStatus('Waiting for Extension');
 
   audioCapture.onStop(() => {
-    logger.info('Extension stopped capture — recordings cleaned up');
-    emitStatus('Capture Stopped');
+    logger.info('Extension stopped capture — generating summary, advice, and tasks...');
+    emitStatus('Capture Stopped — Generating...');
+    generatePostCaptureContent();
   });
 
   await audioCapture.startCapture((base64Chunk) => {
