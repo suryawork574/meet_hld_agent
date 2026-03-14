@@ -53,10 +53,41 @@
       margin-top: 8px;
       text-align: center;
     }
+    .server-config {
+      margin-bottom: 12px;
+    }
+    .server-config label {
+      font-size: 11px;
+      color: #aaa;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .server-config input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #2d2d44;
+      color: #e0e0e0;
+      font-size: 12px;
+      box-sizing: border-box;
+    }
+    .server-config input:focus {
+      outline: none;
+      border-color: #4361ee;
+    }
   </style>
 </head>
 <body>
   <h3>Meet Audio Capture</h3>
+  <div class="server-config">
+    <label>Server URL</label>
+    <input type="text" id="serverUrl" placeholder="https://your-app.run.app">
+  </div>
+  <div class="server-config">
+    <label>Auth Token</label>
+    <input type="password" id="authToken" placeholder="Token set in AUTH_TOKEN env var">
+  </div>
   <div id="status" class="status-idle"> Idle Not capturing</div>
   <button id="startBtn">Start Capture</button>
   <button id="stopBtn" disabled>Stop Capture</button>

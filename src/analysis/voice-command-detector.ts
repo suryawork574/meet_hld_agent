@@ -17,21 +17,24 @@ import { logger } from '../utils/logger.js';
 // speech-to-text mis-transcriptions. Each pattern also captures common
 // prefixes like "hey", "ok", "hay", etc.
 const TRIGGER_PATTERNS: { regex: RegExp; label: string }[] = [
-  // "agent" and common mis-hearings
+  // "Hey Sri" — primary trigger (and common mis-hearings)
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+sri\b/i, label: 'hey sri' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+sree\b/i, label: 'hey sree' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+shri\b/i, label: 'hey shri' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+shree\b/i, label: 'hey shree' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+siri\b/i, label: 'hey siri' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+three\b/i, label: 'hey three' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+tree\b/i, label: 'hey tree' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+free\b/i, label: 'hey free' },
+  { regex: /\b(?:hey|hay|he|hi|ok|okay)\s+see\b/i, label: 'hey see' },
+
+  // "agent" and common mis-hearings (fallback triggers)
   { regex: /\b(?:hey|hay|he|ok|okay|hi|a)?\s*agent\b/i, label: 'agent' },
   { regex: /\b(?:hey|hay|he|ok|okay|hi|a)?\s*a\s*gent\b/i, label: 'a gent' },
-  { regex: /\b(?:hey|hay|he|ok|okay|hi)?\s*agen[td]?\b/i, label: 'agend' },
-  { regex: /\b(?:hey|hay|he|ok|okay|hi)?\s*ajan[td]?\b/i, label: 'ajan' },
-  { regex: /\b(?:hey|hay|he|ok|okay|hi)?\s*age\s*and\b/i, label: 'age and' },
 
   // "hld agent" variations
-  { regex: /\bh\s*l\s*d\s*agent\b/i, label: 'hld agent' },
   { regex: /\bhld\s*agent\b/i, label: 'hld agent' },
-  { regex: /\bhld\b/i, label: 'hld' },
-
-  // "diagram agent" / "design agent"
-  { regex: /\bdiagram\s*agent\b/i, label: 'diagram agent' },
-  { regex: /\bdesign\s*agent\b/i, label: 'design agent' },
+  { regex: /\bh\s*l\s*d\b/i, label: 'hld' },
 ];
 
 // Filler words/phrases between trigger and the actual instruction

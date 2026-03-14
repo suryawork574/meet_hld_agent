@@ -6,7 +6,7 @@ import { TranscriptBuffer } from './analysis/transcript-buffer.js';
 import { detectDesignDiscussion } from './analysis/design-detector.js';
 import { detectVoiceCommand } from './analysis/voice-command-detector.js';
 import { generateDiagram, generateSummary, generateAdvice, generateTasks, getPreviousDiagram } from './analysis/diagram-generator.js';
-import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitTasksUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData } from './dashboard/server.js';
+import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitTasksUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData, server } from './dashboard/server.js';
 
 async function main() {
   // Validate configuration
@@ -22,7 +22,7 @@ async function main() {
 
   // Initialize components
   const transcriptBuffer = new TranscriptBuffer(60 * 60 * 1000); // Keep full session (60 min)
-  const audioCapture = new AudioCapture();
+  const audioCapture = new AudioCapture(server);
   const geminiClient = new GeminiLiveClient();
 
   let lastDiagramGeneration = 0;
@@ -59,7 +59,7 @@ async function main() {
     if (now - lastVoiceCommandTime > VOICE_COMMAND_COOLDOWN_MS) {
       const combined = recentChunks.join(' ');
       // Log combined text so we can see what speech-to-text produces
-      if (combined.toLowerCase().includes('agent') || combined.toLowerCase().includes('hld') || combined.toLowerCase().includes('gent') || combined.toLowerCase().includes('ajan')) {
+      if (combined.toLowerCase().includes('sri') || combined.toLowerCase().includes('sree') || combined.toLowerCase().includes('shri') || combined.toLowerCase().includes('siri') || combined.toLowerCase().includes('three') || combined.toLowerCase().includes('tree') || combined.toLowerCase().includes('free') || combined.toLowerCase().includes('agent') || combined.toLowerCase().includes('hld')) {
         logger.info({ combinedText: combined.substring(0, 300) }, 'Potential voice command text detected — checking...');
       }
       const voiceCmd = detectVoiceCommand(combined);
@@ -217,7 +217,7 @@ async function main() {
   await geminiClient.connect();
 
   // Start audio capture WebSocket server (waits for Chrome extension to connect)
-  logger.info('Starting audio capture server on port 3001...');
+  logger.info('Starting audio capture server on /audio-ws...');
   logger.info('Waiting for Chrome extension to connect...');
   emitStatus('Waiting for Extension');
 

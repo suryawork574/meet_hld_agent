@@ -9,6 +9,7 @@ export const config = {
   designDetectDebounceMs: parseInt(process.env.DESIGN_DETECT_DEBOUNCE_MS || '15000', 10),
   diagramUpdateIntervalMs: parseInt(process.env.DIAGRAM_UPDATE_INTERVAL_MS || '30000', 10),
   gcsBucket: process.env.GCS_BUCKET_NAME || '',
+  authToken: process.env.AUTH_TOKEN || '',
 
   geminiLiveModel: 'models/gemini-2.5-flash-native-audio-latest',
   geminiModel: 'gemini-2.5-flash',

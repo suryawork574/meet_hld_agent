@@ -86,10 +86,15 @@ async function startCapture(tabId) {
     console.log('[BG] Offscreen doc already exists:', e.message);
   }
 
+  // Get saved server URL and auth token
+  const stored = await chrome.storage.sync.get(['serverUrl', 'authToken']);
+
   // Tell offscreen doc to start capturing
   chrome.runtime.sendMessage({
     type: 'OFFSCREEN_START',
     streamId: streamId,
+    serverUrl: stored.serverUrl || '',
+    authToken: stored.authToken || '',
   });
 
   await setState({ capturing: true, tabId: tabId });

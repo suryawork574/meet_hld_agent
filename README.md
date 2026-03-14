@@ -1,14 +1,14 @@
 # Meet HLD Agent
 
-AI agent that joins a Google Meet call, transcribes the conversation in real-time using Gemini Live API, detects system design discussions, and generates live Mermaid.js diagrams on a web dashboard.
+AI agent that listens to a Google Meet call, transcribes the conversation in real-time using Gemini Live API, detects system design discussions, and generates live Mermaid.js diagrams on a web dashboard.
 
 ## Architecture
 
 ```
-Google Meet (Chrome/Puppeteer)
+Chrome Extension (Tab Audio Capture)
        │
-       ▼
- puppeteer-stream (WebM/Opus)
+       ▼ WebSocket (/audio-ws)
+Express + Socket.IO Server (single port)
        │
        ▼
  ffmpeg (PCM 16kHz 16-bit mono)
@@ -20,44 +20,10 @@ Google Meet (Chrome/Puppeteer)
  Design Detector (keyword heuristic + [DESIGN] flag)
        │
        ▼
- Gemini REST API ──► Mermaid.js diagram generation
+ Gemini REST API ──► Mermaid.js diagram + Summary + Advice + Tasks
        │
        ▼
- Express + Socket.IO Dashboard ──► Live diagram + transcript
-```
-
-## Project Structure
-
-```
-src/
-├── index.ts                        # Main orchestrator
-├── meet/
-│   ├── browser.ts                  # Puppeteer + stealth plugin launch
-│   ├── join.ts                     # Google Meet join automation
-│   └── audio-capture.ts           # Tab audio → ffmpeg → PCM chunks
-├── gemini/
-│   ├── client.ts                   # WebSocket client for Gemini Live API
-│   ├── messages.ts                 # Message builders (setup, audio, text)
-│   └── types.ts                    # TypeScript interfaces
-├── analysis/
-│   ├── transcript-buffer.ts        # Sliding window transcript store
-│   ├── design-detector.ts          # Keyword-based design discussion detection
-│   └── diagram-generator.ts        # Transcript → Mermaid.js via Gemini REST API
-├── dashboard/
-│   ├── server.ts                   # Express + Socket.IO server
-│   └── public/
-│       ├── index.html              # Dashboard SPA
-│       ├── app.js                  # Socket.IO client + Mermaid rendering
-│       └── styles.css              # Dark theme styling
-├── config/
-│   └── index.ts                    # Environment variable loading
-└── utils/
-    └── logger.ts                   # Structured logging (pino)
-
-chrome-extension/                   # MV3 extension for tab audio capture
-├── manifest.json
-├── background.js
-└── content.js
+ Socket.IO Dashboard ──► Live diagram + transcript
 ```
 
 ## Prerequisites
@@ -65,7 +31,7 @@ chrome-extension/                   # MV3 extension for tab audio capture
 - **Node.js** >= 18
 - **ffmpeg** installed on your system
 - **Google Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey)
-- **Google Chrome** (Puppeteer will manage it)
+- **Google Chrome** with the Meet HLD Agent extension loaded
 
 ### Install ffmpeg
 
@@ -75,17 +41,13 @@ brew install ffmpeg
 
 # Ubuntu/Debian
 sudo apt-get install ffmpeg
-
-# Windows (via chocolatey)
-choco install ffmpeg
 ```
 
-## Setup
+## Quick Start (Local Development)
 
-1. **Clone and install dependencies**
+1. **Install dependencies**
 
 ```bash
-cd genai_meet_diagram
 npm install
 ```
 
@@ -95,12 +57,11 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
+Edit `.env`:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-GOOGLE_MEET_URL=https://meet.google.com/xxx-yyyy-zzz
-GUEST_NAME=AI Diagram Bot
+GCS_BUCKET_NAME=your-gcs-bucket-name
 DASHBOARD_PORT=3000
 ```
 
@@ -110,63 +71,49 @@ DASHBOARD_PORT=3000
 npm run dev
 ```
 
-4. **Open the dashboard**
+4. **Load the Chrome extension**
 
-Navigate to [http://localhost:3000](http://localhost:3000) in your browser to see:
-- Live transcript (left panel)
-- Real-time Mermaid.js diagram (right panel)
-- Connection status indicators
+   - Open `chrome://extensions/` in Chrome
+   - Enable **Developer mode**
+   - Click **Load unpacked** and select the `chrome-extension/` folder
 
-## How It Works
+5. **Open the dashboard**
 
-1. **Puppeteer** launches Chrome with `puppeteer-extra-plugin-stealth` and joins the specified Google Meet as a guest
-2. **puppeteer-stream** captures tab audio in WebM/Opus format
-3. **ffmpeg** transcodes the audio stream to raw PCM (16kHz, 16-bit, mono) in real-time
-4. PCM audio is chunked into 250ms segments, base64-encoded, and streamed via **WebSocket to Gemini Live API**
-5. Gemini transcribes the audio and flags system design content with a `[DESIGN]` prefix
-6. A local **keyword detector** also scans for design-related terms (architecture, microservice, database, API, etc.)
-7. When design discussion is detected (debounced to every 15s), the last 2 minutes of transcript are sent to the **Gemini REST API** to generate a **Mermaid.js** diagram
-8. The diagram and transcript are pushed to the browser dashboard via **Socket.IO** for live rendering
+   Navigate to [http://localhost:3000](http://localhost:3000)
 
-## Configuration
+6. **Start capturing** — Join a Google Meet, click the extension icon, and hit **Start Capture**
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_API_KEY` | (required) | Google Gemini API key |
-| `GOOGLE_MEET_URL` | (required) | Google Meet URL to join |
-| `GUEST_NAME` | `AI Diagram Bot` | Name shown in Meet |
-| `DASHBOARD_PORT` | `3000` | Dashboard server port |
-| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
-| `AUDIO_CHUNK_MS` | `250` | Audio chunk duration in ms |
-| `DESIGN_DETECT_DEBOUNCE_MS` | `15000` | Min interval between diagram generations |
-| `DIAGRAM_UPDATE_INTERVAL_MS` | `30000` | Diagram update interval |
+---
 
-## Deploy to GCP Cloud Run
+## Deploy to Google Cloud Run
+
+The app is deployed to Cloud Run with **IAM-based authentication** — only authorized Google accounts can access it.
 
 ### Prerequisites
 
-- **Google Cloud SDK (gcloud)** installed and authenticated
-- **Docker** installed locally (or use Cloud Build)
+- **Google Cloud SDK** (`gcloud`) installed and authenticated
 - A **GCP project** with billing enabled
-- **Artifact Registry** or **Container Registry** enabled
 
-### Step 1: Set up GCP project
+### Step 1: Set environment variables
 
 ```bash
-# Set your project ID
-export PROJECT_ID=your-gcp-project-id
-export REGION=us-central1
+export PROJECT_ID="your-gcp-project-id"
+export REGION="asia-south1"
+export SERVICE_NAME="meet-hld-agent"
 
 gcloud config set project $PROJECT_ID
-
-# Enable required APIs
-gcloud services enable run.googleapis.com \
-  artifactregistry.googleapis.com \
-  cloudbuild.googleapis.com \
-  storage.googleapis.com
 ```
 
-### Step 2: Create Artifact Registry repository
+### Step 2: Enable required APIs
+
+```bash
+gcloud services enable \
+  run.googleapis.com \
+  artifactregistry.googleapis.com \
+  cloudbuild.googleapis.com
+```
+
+### Step 3: Create Artifact Registry repository
 
 ```bash
 gcloud artifacts repositories create meet-hld-agent \
@@ -174,135 +121,189 @@ gcloud artifacts repositories create meet-hld-agent \
   --location=$REGION \
   --description="Meet HLD Agent Docker images"
 
-# Configure Docker auth for Artifact Registry
 gcloud auth configure-docker ${REGION}-docker.pkg.dev
 ```
 
-### Step 3: Build and push the Docker image
-
-**Option A: Build locally and push**
+### Step 4: Build and push Docker image
 
 ```bash
-# Build the image
-docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/app:latest .
-
-# Push to Artifact Registry
-docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/app:latest
-```
-
-**Option B: Build using Cloud Build (no local Docker needed)**
-
-```bash
-gcloud builds submit --tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/app:latest .
-```
-
-### Step 4: Create a GCS bucket for meeting storage (optional)
-
-```bash
-export BUCKET_NAME=${PROJECT_ID}-meet-hld-data
-
-gsutil mb -l $REGION gs://${BUCKET_NAME}
+gcloud builds submit . \
+  --tag=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
+  --region=$REGION \
+  --default-buckets-behavior=regional-user-owned-bucket
 ```
 
 ### Step 5: Deploy to Cloud Run
 
 ```bash
-gcloud run deploy meet-hld-agent \
-  --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/app:latest \
-  --region $REGION \
-  --platform managed \
-  --port 3000 \
-  --memory 512Mi \
-  --cpu 1 \
-  --min-instances 0 \
-  --max-instances 3 \
-  --timeout 3600 \
-  --allow-unauthenticated \
-  --set-env-vars "GEMINI_API_KEY=your_gemini_api_key,GCS_BUCKET_NAME=${BUCKET_NAME},LOG_LEVEL=info"
+gcloud run deploy $SERVICE_NAME \
+  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
+  --region=$REGION \
+  --platform=managed \
+  --port=8080 \
+  --timeout=3600 \
+  --min-instances=0 \
+  --max-instances=3 \
+  --memory=1Gi \
+  --cpu=1 \
+  --session-affinity \
+  --no-allow-unauthenticated \
+  --ingress=all \
+  --set-env-vars="GEMINI_API_KEY=your-key,GCS_BUCKET_NAME=your-bucket"
 ```
 
-> **Note:** For production, use **Secret Manager** instead of plain env vars for `GEMINI_API_KEY`:
->
-> ```bash
-> # Create secret
-> echo -n "your_gemini_api_key" | gcloud secrets create gemini-api-key --data-file=-
->
-> # Grant Cloud Run access
-> gcloud secrets add-iam-policy-binding gemini-api-key \
->   --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
->   --role="roles/secretmanager.secretAccessor"
->
-> # Deploy with secret reference
-> gcloud run deploy meet-hld-agent \
->   --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/app:latest \
->   --region $REGION \
->   --platform managed \
->   --port 3000 \
->   --memory 512Mi \
->   --cpu 1 \
->   --timeout 3600 \
->   --allow-unauthenticated \
->   --set-secrets "GEMINI_API_KEY=gemini-api-key:latest" \
->   --set-env-vars "GCS_BUCKET_NAME=${BUCKET_NAME}"
-> ```
-
-### Step 6: Get the deployed URL
+### Step 6: Grant access to users
 
 ```bash
-gcloud run services describe meet-hld-agent --region $REGION --format="value(status.url)"
+# Grant yourself access
+gcloud run services add-iam-policy-binding $SERVICE_NAME \
+  --region=$REGION \
+  --member="user:your-email@gmail.com" \
+  --role="roles/run.invoker"
+
+# Grant access to other users
+gcloud run services add-iam-policy-binding $SERVICE_NAME \
+  --region=$REGION \
+  --member="user:colleague@gmail.com" \
+  --role="roles/run.invoker"
 ```
 
-### Step 7: Update Chrome extension WebSocket URL
-
-After deployment, update the Chrome extension's WebSocket URL to point to your Cloud Run service instead of `localhost:3001`. Edit `chrome-extension/offscreen.js` and replace:
-
-```js
-// Change from:
-const ws = new WebSocket('ws://localhost:3001');
-// Change to:
-const ws = new WebSocket('wss://your-cloud-run-url.run.app/ws');
-```
-
-### Continuous Deployment (optional)
-
-Set up a Cloud Build trigger to auto-deploy on git push:
+### Step 7: Verify deployment
 
 ```bash
-gcloud builds triggers create github \
-  --repo-name=meet-hld-agent \
-  --repo-owner=your-github-username \
-  --branch-pattern="^main$" \
-  --build-config=cloudbuild.yaml
+# Check service status
+gcloud run services describe $SERVICE_NAME --region=$REGION --format="value(status.url)"
+
+# Test with auth token
+TOKEN=$(gcloud auth print-identity-token)
+curl -H "Authorization: Bearer $TOKEN" "$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')/api/status"
 ```
 
-Create `cloudbuild.yaml`:
+---
 
-```yaml
-steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/meet-hld-agent/app:$COMMIT_SHA', '.']
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/meet-hld-agent/app:$COMMIT_SHA']
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      - 'run'
-      - 'deploy'
-      - 'meet-hld-agent'
-      - '--image'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/meet-hld-agent/app:$COMMIT_SHA'
-      - '--region'
-      - '${_REGION}'
-substitutions:
-  _REGION: us-central1
-images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/meet-hld-agent/app:$COMMIT_SHA'
+## Running the App (Cloud Run)
+
+### Step 1: Start the Cloud Run proxy
+
+The proxy runs locally and handles authentication using your `gcloud` credentials:
+
+```bash
+gcloud run services proxy meet-hld-agent --region=asia-south1 --port=8080
 ```
 
-## Notes
+This creates an authenticated tunnel: `localhost:8080` → Cloud Run.
 
-- The browser runs in **headed mode** (not headless) because audio capture requires a visible browser window
-- On Linux servers without a display, use `xvfb-run npm run dev` to provide a virtual display
-- Google Meet may require host approval before the bot can join — the agent waits up to 2 minutes for approval
-- The bot joins with mic and camera turned off
-- Diagram generation uses a two-stage approach: Gemini Live API for transcription, Gemini REST API for Mermaid generation — this produces better structured diagrams than trying to do both in the streaming session
+### Step 2: Open the dashboard
+
+Navigate to [http://localhost:8080](http://localhost:8080) in your browser.
+
+### Step 3: Start capturing audio
+
+1. Join a Google Meet call in Chrome
+2. Click the **Meet HLD Agent** extension icon
+3. Click **Start Capture**
+4. The extension sends audio to `ws://localhost:8080/audio-ws` → proxy → Cloud Run
+
+### How it works
+
+```
+Chrome Extension
+       │
+       ▼ ws://localhost:8080/audio-ws
+ gcloud proxy (adds auth automatically)
+       │
+       ▼ wss:// (authenticated)
+ Cloud Run Service
+       ├── Dashboard (HTTP + Socket.IO)
+       ├── Audio WebSocket (/audio-ws)
+       └── REST APIs (/api/*)
+```
+
+---
+
+## Updating the Deployment
+
+```bash
+# Build and push new image
+gcloud builds submit . \
+  --tag=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
+  --region=$REGION \
+  --default-buckets-behavior=regional-user-owned-bucket
+
+# Deploy new revision
+gcloud run deploy $SERVICE_NAME \
+  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
+  --region=$REGION
+```
+
+---
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEMINI_API_KEY` | (required) | Google Gemini API key |
+| `GCS_BUCKET_NAME` | (optional) | GCS bucket for saving meeting data |
+| `DASHBOARD_PORT` | `3000` | Dashboard port (local dev) |
+| `PORT` | `8080` | Server port (set by Cloud Run) |
+| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+| `AUDIO_CHUNK_MS` | `250` | Audio chunk duration in ms |
+| `DESIGN_DETECT_DEBOUNCE_MS` | `15000` | Min interval between diagram generations |
+| `DIAGRAM_UPDATE_INTERVAL_MS` | `30000` | Diagram update interval |
+
+## Project Structure
+
+```
+src/
+├── index.ts                        # Main orchestrator
+├── config/index.ts                 # Environment variable loading
+├── meet/
+│   └── audio-capture.ts            # WebSocket audio → ffmpeg → PCM chunks
+├── gemini/
+│   ├── client.ts                   # Gemini Live API WebSocket client
+│   ├── messages.ts                 # Message builders
+│   └── types.ts                    # TypeScript interfaces
+├── analysis/
+│   ├── transcript-buffer.ts        # Sliding window transcript store
+│   ├── design-detector.ts          # Keyword-based design detection
+│   ├── voice-command-detector.ts   # Voice command recognition
+│   └── diagram-generator.ts        # Mermaid diagram + summary + advice + tasks
+├── dashboard/
+│   ├── server.ts                   # Express + Socket.IO server
+│   └── public/                     # Dashboard frontend (HTML/CSS/JS)
+├── storage/
+│   └── gcs.ts                      # Google Cloud Storage integration
+└── utils/
+    └── logger.ts                   # Structured logging (pino)
+
+chrome-extension/                   # Chrome extension (Manifest V3)
+├── manifest.json
+├── background.js
+├── popup.js & popup.html
+├── offscreen.js & offscreen.html   # Audio capture via MediaRecorder
+```
+
+## Troubleshooting
+
+### Cloud Run proxy won't start
+```bash
+# Make sure you're authenticated
+gcloud auth login
+gcloud auth application-default login
+```
+
+### WebSocket connection fails
+- Ensure the proxy is running: `gcloud run services proxy meet-hld-agent --region=asia-south1 --port=8080`
+- Check that port 8080 isn't in use by another process
+
+### Extension shows "Cannot connect"
+- Start the Cloud Run proxy first, then try the extension
+- Check the proxy terminal for errors
+
+### 403 Forbidden
+- Your account needs `roles/run.invoker` on the Cloud Run service
+- Run the grant command from Step 6 above
+
+### Cold start delay
+- First request after inactivity may take 3-5 seconds
+- Use `--min-instances=1` during active use to avoid cold starts (adds cost)

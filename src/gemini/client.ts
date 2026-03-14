@@ -61,6 +61,12 @@ export class GeminiLiveClient extends EventEmitter {
   }
 
   private handleMessage(message: GeminiServerContent, onReady?: (value: void) => void) {
+    // Log top-level keys for debugging
+    const topKeys = Object.keys(message);
+    if (!topKeys.includes('setupComplete')) {
+      logger.info({ topKeys }, 'Gemini message top-level keys');
+    }
+
     if (message.setupComplete !== undefined) {
       logger.info('Gemini Live API session ready');
       this.isReady = true;
@@ -72,6 +78,13 @@ export class GeminiLiveClient extends EventEmitter {
 
     // Input audio transcription — accumulate fragments, flush as sentences
     const sc = message.serverContent as any;
+
+    // Log raw message keys for debugging (first few times)
+    if (sc) {
+      const keys = Object.keys(sc);
+      logger.info({ keys }, 'Gemini serverContent keys');
+    }
+
     if (sc?.inputTranscription) {
       const t = sc.inputTranscription;
       // Handle all possible shapes: { text }, { parts: [{ text }] }, or string

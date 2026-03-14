@@ -1,6 +1,28 @@
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const statusEl = document.getElementById('status');
+const serverUrlInput = document.getElementById('serverUrl');
+const authTokenInput = document.getElementById('authToken');
+
+// Load saved server URL and auth token
+chrome.storage.sync.get(['serverUrl', 'authToken'], (result) => {
+  if (result.serverUrl) {
+    serverUrlInput.value = result.serverUrl;
+  }
+  if (result.authToken) {
+    authTokenInput.value = result.authToken;
+  }
+});
+
+// Save server URL on change
+serverUrlInput.addEventListener('change', () => {
+  chrome.storage.sync.set({ serverUrl: serverUrlInput.value.trim() });
+});
+
+// Save auth token on change
+authTokenInput.addEventListener('change', () => {
+  chrome.storage.sync.set({ authToken: authTokenInput.value.trim() });
+});
 
 function setStatus(text, state) {
   statusEl.textContent = text;

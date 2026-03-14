@@ -1,27 +1,29 @@
 FROM node:20-slim
 
-# Install ffmpeg (needed for audio processing)
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg (needed for audio transcoding)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy package files and install all dependencies (need devDeps for tsc)
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
-# Copy source code
+# Copy source code and build TypeScript
 COPY tsconfig.json ./
 COPY src/ ./src/
-
-# Build TypeScript
 RUN npx tsc
 
 # Copy static files that tsc doesn't handle
 RUN cp -r src/dashboard/public dist/dashboard/public
 
-# Expose the dashboard port
-EXPOSE 3000
+# Remove dev dependencies to slim down
+RUN npm prune --omit=dev
 
-# Cloud Run sets PORT env var, but our app uses DASHBOARD_PORT
-# We'll handle this in the start command
+ENV NODE_ENV=production
+ENV PORT=8080
+EXPOSE 8080
+
 CMD ["node", "dist/index.js"]

@@ -4,9 +4,29 @@
 let recorder = null;
 let wsConnection = null;
 
+function buildWsUrl(baseUrl, token) {
+  // Convert HTTP(S) URL to WS(S) URL with /audio-ws path
+  let url = (baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
+  if (url.startsWith('https://')) {
+    url = 'wss://' + url.substring(8);
+  } else if (url.startsWith('http://')) {
+    url = 'ws://' + url.substring(7);
+  } else if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+    url = 'ws://' + url;
+  }
+  if (!url.endsWith('/audio-ws')) {
+    url += '/audio-ws';
+  }
+  if (token) {
+    url += '?token=' + encodeURIComponent(token);
+  }
+  return url;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'OFFSCREEN_START') {
-    handleStart(message.streamId);
+    const wsUrl = buildWsUrl(message.serverUrl, message.authToken);
+    handleStart(message.streamId, wsUrl);
   }
 
   if (message.type === 'OFFSCREEN_STOP') {
@@ -16,7 +36,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false; // no async response
 });
 
-async function handleStart(streamId) {
+async function handleStart(streamId, wsUrl) {
   console.log('[Offscreen] Starting capture with streamId:', streamId?.substring(0, 30));
 
   try {
@@ -34,7 +54,8 @@ async function handleStart(streamId) {
     console.log('[Offscreen] Got media stream, audio tracks:', stream.getAudioTracks().length);
 
     // Connect to the Node.js server via WebSocket
-    wsConnection = new WebSocket('ws://localhost:3001');
+    console.log('[Offscreen] Connecting to WebSocket:', wsUrl);
+    wsConnection = new WebSocket(wsUrl);
 
     wsConnection.onopen = () => {
       console.log('[Offscreen] WebSocket connected to Node.js server');
@@ -58,11 +79,11 @@ async function handleStart(streamId) {
     };
 
     wsConnection.onerror = () => {
-      console.error('[Offscreen] WebSocket error — is the Node.js server running on port 3001?');
+      console.error('[Offscreen] WebSocket error — cannot connect to:', wsUrl);
       chrome.runtime.sendMessage({
         type: 'CAPTURE_STATUS',
         status: 'error',
-        error: 'Cannot connect to Node.js server on port 3001. Start the app first.',
+        error: `Cannot connect to server at ${wsUrl}. Check the Server URL in extension settings.`,
       });
       stream.getTracks().forEach(t => t.stop());
     };

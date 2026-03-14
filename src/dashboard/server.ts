@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { resetDiagram, getPreviousDiagram, generateDiagram, generateSummary, generateAdvice, generateTasks } from '../analysis/diagram-generator.js';
@@ -12,8 +13,108 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const server = createServer(app);
+
+// Generate a session secret from AUTH_TOKEN (so cookies can't be forged)
+const SESSION_COOKIE = 'meet_hld_session';
+function generateSessionValue(): string {
+  return crypto.createHmac('sha256', config.authToken).update('session').digest('hex');
+}
+
+// Auth middleware — checks cookie or ?token= query param
+function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  // Skip auth if no AUTH_TOKEN is configured
+  if (!config.authToken) return next();
+
+  // Check if token is in query param — if valid, set cookie and redirect to clean URL
+  const queryToken = req.query.token as string;
+  if (queryToken === config.authToken) {
+    res.cookie(SESSION_COOKIE, generateSessionValue(), {
+      httpOnly: true,
+      secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+    // For API requests, just continue; for page requests, redirect to remove token from URL
+    if (req.path.startsWith('/api/')) return next();
+    const cleanUrl = req.path || '/';
+    return res.redirect(cleanUrl);
+  }
+
+  // Check session cookie
+  const cookieHeader = req.headers.cookie || '';
+  const cookies = Object.fromEntries(cookieHeader.split(';').map(c => {
+    const [k, ...v] = c.trim().split('=');
+    return [k, v.join('=')];
+  }));
+  if (cookies[SESSION_COOKIE] === generateSessionValue()) {
+    return next();
+  }
+
+  // Not authenticated — show login page
+  res.status(401).send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0;
+               display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .login { background: #16213e; padding: 40px; border-radius: 12px; text-align: center; max-width: 400px; }
+        h2 { margin: 0 0 20px; }
+        input { padding: 10px 14px; border: 1px solid #444; border-radius: 6px; background: #2d2d44;
+                color: #e0e0e0; font-size: 14px; width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+        button { padding: 10px 20px; background: #4361ee; color: #fff; border: none; border-radius: 6px;
+                 font-size: 14px; cursor: pointer; width: 100%; }
+        button:hover { background: #3a56d4; }
+        .error { color: #e87171; font-size: 13px; margin-top: 8px; display: none; }
+      </style>
+    </head>
+    <body>
+      <div class="login">
+        <h2>Meet HLD Agent</h2>
+        <p style="color:#aaa;font-size:13px;">Enter the auth token to access the dashboard</p>
+        <input type="password" id="token" placeholder="Auth Token" autofocus>
+        <button onclick="login()">Login</button>
+        <div class="error" id="error">Invalid token</div>
+      </div>
+      <script>
+        function login() {
+          const token = document.getElementById('token').value.trim();
+          if (token) window.location.href = '/?token=' + encodeURIComponent(token);
+        }
+        document.getElementById('token').addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') login();
+        });
+      </script>
+    </body>
+    </html>
+  `);
+}
+
+// Apply auth to all routes
+app.use(authMiddleware);
+
 const io = new SocketIOServer(server, {
   cors: { origin: '*' },
+});
+
+// Authenticate Socket.IO connections
+io.use((socket, next) => {
+  if (!config.authToken) return next();
+
+  // Check token from query param (Socket.IO handshake)
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  if (token === config.authToken) return next();
+
+  // Check session cookie
+  const cookieHeader = socket.handshake.headers.cookie || '';
+  const cookies = Object.fromEntries(cookieHeader.split(';').map(c => {
+    const [k, ...v] = c.trim().split('=');
+    return [k, v.join('=')];
+  }));
+  if (cookies[SESSION_COOKIE] === generateSessionValue()) return next();
+
+  logger.warn('Socket.IO connection rejected — invalid token');
+  next(new Error('Authentication required'));
 });
 
 // Parse JSON bodies
@@ -263,4 +364,4 @@ export function onGetMeetingData(callback: typeof getMeetingDataCallback) {
   getMeetingDataCallback = callback;
 }
 
-export { io };
+export { io, server };

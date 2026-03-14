@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { createWriteStream, mkdirSync, unlinkSync, existsSync, readdirSync, rmdirSync, type WriteStream } from 'fs';
 import path from 'path';
+import type { Server as HttpServer, IncomingMessage } from 'http';
 import { WebSocketServer } from 'ws';
+import { URL } from 'url';
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 
-const AUDIO_WS_PORT = 3001;
 const RECORDINGS_DIR = path.resolve('recordings');
 
 export class AudioCapture {
@@ -18,9 +19,11 @@ export class AudioCapture {
   private rawFilePath: string | null = null;
   private pcmFilePath: string | null = null;
   private onStopCallback: (() => void) | null = null;
+  private httpServer: HttpServer | null = null;
 
-  constructor() {
+  constructor(httpServer?: HttpServer) {
     this.bytesPerChunk = 16000 * 2 * 1 * (config.audioChunkMs / 1000);
+    this.httpServer = httpServer || null;
   }
 
   onStop(callback: () => void) {
@@ -40,9 +43,24 @@ export class AudioCapture {
     this.pcmFileStream = createWriteStream(this.pcmFilePath);
     logger.info({ rawFilePath: this.rawFilePath, pcmFilePath: this.pcmFilePath }, 'Saving audio recordings');
 
-    // 1. Start WebSocket server for extension audio data
-    this.wss = new WebSocketServer({ port: AUDIO_WS_PORT });
-    logger.info({ port: AUDIO_WS_PORT }, 'Audio WS server listening');
+    // Verify auth token on WebSocket upgrade
+    const verifyClient = (info: { origin: string; req: IncomingMessage; secure: boolean }) => {
+      if (!config.authToken) return true; // no token configured = allow all
+      const url = new URL(info.req.url || '', `http://${info.req.headers.host}`);
+      const token = url.searchParams.get('token');
+      if (token === config.authToken) return true;
+      logger.warn({ origin: info.origin }, 'WebSocket connection rejected — invalid token');
+      return false;
+    };
+
+    // 1. Start WebSocket server for extension audio data (on shared HTTP server at /audio-ws)
+    if (this.httpServer) {
+      this.wss = new WebSocketServer({ server: this.httpServer, path: '/audio-ws', verifyClient });
+      logger.info({ path: '/audio-ws' }, 'Audio WS server listening on shared HTTP server');
+    } else {
+      this.wss = new WebSocketServer({ port: 3001, verifyClient });
+      logger.info({ port: 3001 }, 'Audio WS server listening on standalone port');
+    }
 
     // 2. Start ffmpeg
     this.ffmpegProcess = spawn('ffmpeg', [
