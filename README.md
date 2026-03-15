@@ -1,29 +1,75 @@
 # Meet HLD Agent
 
-AI agent that listens to a Google Meet call, transcribes the conversation in real-time using Gemini Live API, detects system design discussions, and generates live Mermaid.js diagrams on a web dashboard.
+AI-powered tool that listens to Google Meet calls, transcribes conversations in real-time using Gemini Live API, detects system design discussions, and generates live Mermaid.js architecture diagrams on a web dashboard.
 
 ## Architecture
 
 ```
-Chrome Extension (Tab Audio Capture)
-       │
-       ▼ WebSocket (/audio-ws)
-Express + Socket.IO Server (single port)
-       │
-       ▼
- ffmpeg (PCM 16kHz 16-bit mono)
-       │
-       ▼
- Gemini Live API (WebSocket) ──► Real-time transcription
-       │
-       ▼
- Design Detector (keyword heuristic + [DESIGN] flag)
-       │
-       ▼
- Gemini REST API ──► Mermaid.js diagram + Summary + Advice + Tasks
-       │
-       ▼
- Socket.IO Dashboard ──► Live diagram + transcript
+                          Google Meet Tab (Browser)
+                                  │
+                                  ▼
+                    ┌──────────────────────────┐
+                    │  Chrome Extension (MV3)  │
+                    │  ├── popup.js (config UI) │
+                    │  ├── background.js        │
+                    │  └── offscreen.js          │
+                    │      (tabCapture + audio)  │
+                    └────────────┬───────────────┘
+                                 │ WebSocket (wss://)
+                                 │ ?token=AUTH_TOKEN
+                                 ▼
+              ┌──────────────────────────────────────────────┐
+              │       Cloud Run Service (Port 8080)          │
+              │                                              │
+              │  ┌────────────────────────────────────────┐  │
+              │  │  Express + Socket.IO Server             │  │
+              │  │    ├── /            Dashboard (HTTP)    │  │
+              │  │    ├── /api/*       REST APIs           │  │
+              │  │    ├── /socket.io   Real-time events    │  │
+              │  │    └── /audio-ws    Audio WebSocket     │  │
+              │  │         (persistent, survives reconnects)│  │
+              │  └──────────────┬──────────────────────────┘  │
+              │                 │                              │
+              │                 ▼                              │
+              │         ffmpeg (WebM/Opus → PCM 16kHz mono)   │
+              │                 │                              │
+              │                 ▼                              │
+              │     Gemini Live API (WebSocket)                │
+              │       ├── inputAudioTranscription              │
+              │       │   (real-time speech-to-text)           │
+              │       ├── outputAudioTranscription             │
+              │       │   ([DESIGN] flag detection)            │
+              │       └── responseModalities: AUDIO            │
+              │                 │                              │
+              │                 ▼                              │
+              │     ┌───────────────────────────┐              │
+              │     │  Analysis Pipeline         │             │
+              │     │  ├── Design Detector       │             │
+              │     │  │   (keyword heuristic    │             │
+              │     │  │    + AI [DESIGN] flag)  │             │
+              │     │  ├── Voice Command Detector│             │
+              │     │  │   ("Hey Sri, ...")       │             │
+              │     │  └── Transcript Buffer     │             │
+              │     │      (cumulative dedup)     │             │
+              │     └───────────┬───────────────┘              │
+              │                 │                              │
+              │      ┌──────────┴──────────┐                   │
+              │      ▼ (real-time)         ▼ (on stop-capture) │
+              │  Gemini REST API      Gemini REST API           │
+              │  (gemini-3.1-pro)     (gemini-3.1-pro)          │
+              │  └── Mermaid.js       ├── Meeting Summary       │
+              │      diagram          ├── Architecture Advice   │
+              │                       └── Task Breakdown        │
+              │                 │                              │
+              │                 ▼                              │
+              │     Socket.IO → Dashboard (real-time push)     │
+              │                 │                              │
+              │                 ▼                              │
+              │     Google Cloud Storage (persistence)         │
+              └──────────────────────────────────────────────┘
+                                │
+                                ▼
+                   User's Browser (Dashboard)
 ```
 
 ## Prerequisites
@@ -62,6 +108,7 @@ Edit `.env`:
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
 GCS_BUCKET_NAME=your-gcs-bucket-name
+AUTH_TOKEN=your-secret-token
 DASHBOARD_PORT=3000
 ```
 
@@ -76,10 +123,11 @@ npm run dev
    - Open `chrome://extensions/` in Chrome
    - Enable **Developer mode**
    - Click **Load unpacked** and select the `chrome-extension/` folder
+   - Click the extension icon, set **Server URL** to `http://localhost:3000` and **Auth Token**
 
 5. **Open the dashboard**
 
-   Navigate to [http://localhost:3000](http://localhost:3000)
+   Navigate to [http://localhost:3000](http://localhost:3000) — enter your AUTH_TOKEN when prompted.
 
 6. **Start capturing** — Join a Google Meet, click the extension icon, and hit **Start Capture**
 
@@ -87,154 +135,16 @@ npm run dev
 
 ## Deploy to Google Cloud Run
 
-The app is deployed to Cloud Run with **IAM-based authentication** — only authorized Google accounts can access it.
-
-### Prerequisites
-
-- **Google Cloud SDK** (`gcloud`) installed and authenticated
-- A **GCP project** with billing enabled
-
-### Step 1: Set environment variables
-
 ```bash
-export PROJECT_ID="your-gcp-project-id"
-export REGION="asia-south1"
-export SERVICE_NAME="meet-hld-agent"
-
-gcloud config set project $PROJECT_ID
+# One-command deploy from source
+gcloud run deploy meet-hld-agent \
+  --source . \
+  --region=asia-south1 \
+  --allow-unauthenticated \
+  --set-env-vars="GEMINI_API_KEY=your-key,GCS_BUCKET_NAME=your-bucket,AUTH_TOKEN=$(openssl rand -hex 16)"
 ```
 
-### Step 2: Enable required APIs
-
-```bash
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  cloudbuild.googleapis.com
-```
-
-### Step 3: Create Artifact Registry repository
-
-```bash
-gcloud artifacts repositories create meet-hld-agent \
-  --repository-format=docker \
-  --location=$REGION \
-  --description="Meet HLD Agent Docker images"
-
-gcloud auth configure-docker ${REGION}-docker.pkg.dev
-```
-
-### Step 4: Build and push Docker image
-
-```bash
-gcloud builds submit . \
-  --tag=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
-  --region=$REGION \
-  --default-buckets-behavior=regional-user-owned-bucket
-```
-
-### Step 5: Deploy to Cloud Run
-
-```bash
-gcloud run deploy $SERVICE_NAME \
-  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
-  --region=$REGION \
-  --platform=managed \
-  --port=8080 \
-  --timeout=3600 \
-  --min-instances=0 \
-  --max-instances=3 \
-  --memory=1Gi \
-  --cpu=1 \
-  --session-affinity \
-  --no-allow-unauthenticated \
-  --ingress=all \
-  --set-env-vars="GEMINI_API_KEY=your-key,GCS_BUCKET_NAME=your-bucket"
-```
-
-### Step 6: Grant access to users
-
-```bash
-# Grant yourself access
-gcloud run services add-iam-policy-binding $SERVICE_NAME \
-  --region=$REGION \
-  --member="user:your-email@gmail.com" \
-  --role="roles/run.invoker"
-
-# Grant access to other users
-gcloud run services add-iam-policy-binding $SERVICE_NAME \
-  --region=$REGION \
-  --member="user:colleague@gmail.com" \
-  --role="roles/run.invoker"
-```
-
-### Step 7: Verify deployment
-
-```bash
-# Check service status
-gcloud run services describe $SERVICE_NAME --region=$REGION --format="value(status.url)"
-
-# Test with auth token
-TOKEN=$(gcloud auth print-identity-token)
-curl -H "Authorization: Bearer $TOKEN" "$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')/api/status"
-```
-
----
-
-## Running the App (Cloud Run)
-
-### Step 1: Start the Cloud Run proxy
-
-The proxy runs locally and handles authentication using your `gcloud` credentials:
-
-```bash
-gcloud run services proxy meet-hld-agent --region=asia-south1 --port=8080
-```
-
-This creates an authenticated tunnel: `localhost:8080` → Cloud Run.
-
-### Step 2: Open the dashboard
-
-Navigate to [http://localhost:8080](http://localhost:8080) in your browser.
-
-### Step 3: Start capturing audio
-
-1. Join a Google Meet call in Chrome
-2. Click the **Meet HLD Agent** extension icon
-3. Click **Start Capture**
-4. The extension sends audio to `ws://localhost:8080/audio-ws` → proxy → Cloud Run
-
-### How it works
-
-```
-Chrome Extension
-       │
-       ▼ ws://localhost:8080/audio-ws
- gcloud proxy (adds auth automatically)
-       │
-       ▼ wss:// (authenticated)
- Cloud Run Service
-       ├── Dashboard (HTTP + Socket.IO)
-       ├── Audio WebSocket (/audio-ws)
-       └── REST APIs (/api/*)
-```
-
----
-
-## Updating the Deployment
-
-```bash
-# Build and push new image
-gcloud builds submit . \
-  --tag=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
-  --region=$REGION \
-  --default-buckets-behavior=regional-user-owned-bucket
-
-# Deploy new revision
-gcloud run deploy $SERVICE_NAME \
-  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/meet-hld-agent/${SERVICE_NAME}:latest \
-  --region=$REGION
-```
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ---
 
@@ -243,6 +153,7 @@ gcloud run deploy $SERVICE_NAME \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GEMINI_API_KEY` | (required) | Google Gemini API key |
+| `AUTH_TOKEN` | (optional) | Shared secret for WebSocket + dashboard auth |
 | `GCS_BUCKET_NAME` | (optional) | GCS bucket for saving meeting data |
 | `DASHBOARD_PORT` | `3000` | Dashboard port (local dev) |
 | `PORT` | `8080` | Server port (set by Cloud Run) |
@@ -251,58 +162,95 @@ gcloud run deploy $SERVICE_NAME \
 | `DESIGN_DETECT_DEBOUNCE_MS` | `15000` | Min interval between diagram generations |
 | `DIAGRAM_UPDATE_INTERVAL_MS` | `30000` | Diagram update interval |
 
+## AI Models Used
+
+| Model | Purpose | API |
+|-------|---------|-----|
+| `gemini-2.5-flash-native-audio-latest` | Real-time audio transcription + design detection | Gemini Live API (WebSocket) |
+| `gemini-3.1-pro-preview` | Mermaid diagram, summary, advice, tasks generation | Gemini REST API |
+
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| Real-time Transcription | Live speech-to-text via Gemini Live API with cumulative deduplication |
+| Auto Design Detection | Keyword heuristic + AI [DESIGN] flag detection |
+| Live Mermaid.js Diagrams | Auto-generated and styled architecture diagrams with zoom controls |
+| Voice Commands | Say *"Hey Sri, add a cache layer"* — diagram updates live |
+| Deferred Content Generation | Summary, advice, and tasks generated on stop-capture (not real-time) for performance |
+| Meeting Persistence | Save/load meeting data to/from Google Cloud Storage |
+| Dashboard Auth | Cookie-based session auth with login page (AUTH_TOKEN) |
+| WebSocket Auth | Token validated on WebSocket upgrade via `?token=` query param |
+| Persistent WebSocket Server | `/audio-ws` stays alive across extension reconnections |
+| Clear All | Single button to reset diagram, transcript, summary, suggestions, and tasks |
+| Cloud Deployment | Dockerized on GCP Cloud Run — direct WebSocket, no proxy needed |
+
 ## Project Structure
 
 ```
 src/
 ├── index.ts                        # Main orchestrator
-├── config/index.ts                 # Environment variable loading
+├── config/index.ts                 # Environment config + model settings
 ├── meet/
-│   └── audio-capture.ts            # WebSocket audio → ffmpeg → PCM chunks
+│   └── audio-capture.ts            # Persistent WSS → ffmpeg → PCM chunks
 ├── gemini/
-│   ├── client.ts                   # Gemini Live API WebSocket client
-│   ├── messages.ts                 # Message builders
+│   ├── client.ts                   # Gemini Live API client (cumulative transcript dedup)
+│   ├── messages.ts                 # Setup + audio chunk message builders
 │   └── types.ts                    # TypeScript interfaces
 ├── analysis/
-│   ├── transcript-buffer.ts        # Sliding window transcript store
+│   ├── transcript-buffer.ts        # Sliding window transcript store with clear()
 │   ├── design-detector.ts          # Keyword-based design detection
-│   ├── voice-command-detector.ts   # Voice command recognition
+│   ├── voice-command-detector.ts   # "Hey Sri" voice command recognition
 │   └── diagram-generator.ts        # Mermaid diagram + summary + advice + tasks
 ├── dashboard/
-│   ├── server.ts                   # Express + Socket.IO server
+│   ├── server.ts                   # Express + Socket.IO + auth middleware + clear:all
 │   └── public/                     # Dashboard frontend (HTML/CSS/JS)
 ├── storage/
 │   └── gcs.ts                      # Google Cloud Storage integration
 └── utils/
     └── logger.ts                   # Structured logging (pino)
 
-chrome-extension/                   # Chrome extension (Manifest V3)
+chrome-extension/                   # Chrome Extension (Manifest V3)
 ├── manifest.json
-├── background.js
-├── popup.js & popup.html
-├── offscreen.js & offscreen.html   # Audio capture via MediaRecorder
+├── background.js                   # Reads config from chrome.storage.sync
+├── popup.js & popup.html           # Config UI (Server URL + Auth Token)
+├── offscreen.js & offscreen.html   # Audio capture + WebSocket streaming
 ```
+
+## Voice Commands
+
+Say **"Hey Sri"** (or variants: Sree, Shri, Siri) followed by an instruction during the meeting:
+
+| Voice Command | Action |
+|--------------|--------|
+| *"Hey Sri, add a Redis cache between the API and database"* | Adds cache layer to diagram |
+| *"Hey Sri, replace Kafka with RabbitMQ"* | Swaps message broker component |
+| *"Hey Sri, add a reporting service with OLAP database"* | Adds new service + database nodes |
+| *"Hey Sri, show async communication between order and notification"* | Updates arrows to dashed async |
+
+- 10-second cooldown between commands
+- Minimum instruction length required (>10 chars)
+- Fallback triggers: "Hey Agent", "Hey HLD"
 
 ## Troubleshooting
 
-### Cloud Run proxy won't start
-```bash
-# Make sure you're authenticated
-gcloud auth login
-gcloud auth application-default login
-```
-
-### WebSocket connection fails
-- Ensure the proxy is running: `gcloud run services proxy meet-hld-agent --region=asia-south1 --port=8080`
-- Check that port 8080 isn't in use by another process
-
 ### Extension shows "Cannot connect"
-- Start the Cloud Run proxy first, then try the extension
-- Check the proxy terminal for errors
+- Ensure the server is running (locally or on Cloud Run)
+- Check Server URL and Auth Token in extension popup settings
+- Verify AUTH_TOKEN matches between extension and server
 
-### 403 Forbidden
-- Your account needs `roles/run.invoker` on the Cloud Run service
-- Run the grant command from Step 6 above
+### No transcription appearing
+- Check Cloud Run logs: `gcloud run services logs read meet-hld-agent --region=asia-south1 --limit=50`
+- Look for "Gemini Live API session ready" — if missing, check GEMINI_API_KEY
+- Look for "Input transcription received" messages in logs
+
+### Dashboard shows stale data after refresh
+- Data is now preserved on refresh — server sends current state to new connections
+- Use the **Clear** button to reset all data (diagram, transcript, summary, suggestions, tasks)
+
+### Diagram too zoomed in
+- Initial zoom is set to 60% — use +/- buttons or Ctrl+scroll to adjust
+- Click "Fit" to auto-fit diagram to container
 
 ### Cold start delay
 - First request after inactivity may take 3-5 seconds

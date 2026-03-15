@@ -1,10 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+const genAINew = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 let previousDiagram = '';
+let previousImageBase64 = '';
 
 const DIAGRAM_PROMPT = `You are an expert system design architect. Generate a Mermaid.js flowchart from the meeting transcript below.
 
@@ -311,10 +314,83 @@ function isValidMermaidSyntax(code: string): boolean {
   return validStarts.some(start => firstLine.startsWith(start.toLowerCase()));
 }
 
+const IMAGE_DIAGRAM_PROMPT = `You are an expert system design architect and visual designer. Create a professional, clean architecture diagram as an IMAGE based on the meeting transcript below.
+
+The diagram should look like a whiteboard-style system architecture diagram with:
+- Clean boxes/rectangles for services and components (use different colors: blue for services, green for databases, orange for queues/messaging, purple for external clients, red for caches)
+- Labeled arrows showing data flow and communication between components
+- Clear grouping of related components (e.g., "Data Layer", "API Layer", "Client Layer")
+- Professional color scheme with white/light background
+- Clear, readable text labels on all components and connections
+- Include icons or symbols where appropriate (database cylinder, cloud symbol, etc.)
+- Show synchronous vs asynchronous communication (solid vs dashed arrows)
+
+Make it look like a professional architecture diagram you'd see in a technical design document or on a whiteboard during a design review.
+
+{PREVIOUS_CONTEXT}
+
+Meeting transcript:
+{TRANSCRIPT}
+
+{SUGGESTION}
+
+Generate a clear, professional system architecture diagram image.`;
+
+export async function generateDiagramImage(transcript: string, suggestion?: string): Promise<string | null> {
+  try {
+    logger.info('Generating architecture diagram image via Gemini...');
+
+    let prompt = IMAGE_DIAGRAM_PROMPT
+      .replace('{PREVIOUS_CONTEXT}',
+        previousDiagram
+          ? `The current system design includes these components (from Mermaid diagram):\n${previousDiagram}\nUpdate and improve this design visually.`
+          : 'No previous diagram exists yet. Create a fresh architecture diagram.'
+      )
+      .replace('{TRANSCRIPT}', transcript)
+      .replace('{SUGGESTION}',
+        suggestion
+          ? `User's specific request: ${suggestion}\nIncorporate this into the diagram.`
+          : ''
+      );
+
+    const response = await genAINew.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseModalities: ['TEXT', 'IMAGE'],
+      },
+    });
+
+    // Extract image from response
+    if (response.candidates && response.candidates[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData && part.inlineData.mimeType?.startsWith('image/')) {
+          const base64Data = part.inlineData.data;
+          const mimeType = part.inlineData.mimeType;
+          previousImageBase64 = `data:${mimeType};base64,${base64Data}`;
+          logger.info({ mimeType, dataLength: base64Data?.length }, 'Architecture diagram image generated successfully');
+          return previousImageBase64;
+        }
+      }
+    }
+
+    logger.warn('No image found in Gemini response');
+    return previousImageBase64 || null;
+  } catch (err) {
+    logger.error({ err }, 'Failed to generate diagram image');
+    return previousImageBase64 || null;
+  }
+}
+
 export function getPreviousDiagram(): string {
   return previousDiagram;
 }
 
+export function getPreviousImageBase64(): string {
+  return previousImageBase64;
+}
+
 export function resetDiagram() {
   previousDiagram = '';
+  previousImageBase64 = '';
 }

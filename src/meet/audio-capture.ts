@@ -11,7 +11,7 @@ const RECORDINGS_DIR = path.resolve('recordings');
 
 export class AudioCapture {
   private ffmpegProcess: ChildProcess | null = null;
-  private wss: WebSocketServer | null = null;
+  private wss: WebSocketServer;
   private onChunkCallback: ((base64Chunk: string) => void) | null = null;
   private bytesPerChunk: number;
   private rawFileStream: WriteStream | null = null;
@@ -19,11 +19,24 @@ export class AudioCapture {
   private rawFilePath: string | null = null;
   private pcmFilePath: string | null = null;
   private onStopCallback: (() => void) | null = null;
-  private httpServer: HttpServer | null = null;
+  private capturing = false;
 
-  constructor(httpServer?: HttpServer) {
+  constructor(httpServer: HttpServer) {
     this.bytesPerChunk = 16000 * 2 * 1 * (config.audioChunkMs / 1000);
-    this.httpServer = httpServer || null;
+
+    // Verify auth token on WebSocket upgrade
+    const verifyClient = (info: { origin: string; req: IncomingMessage; secure: boolean }) => {
+      if (!config.authToken) return true;
+      const url = new URL(info.req.url || '', `http://${info.req.headers.host}`);
+      const token = url.searchParams.get('token');
+      if (token === config.authToken) return true;
+      logger.warn({ origin: info.origin }, 'WebSocket connection rejected — invalid token');
+      return false;
+    };
+
+    // Create WSS once — it stays alive for the lifetime of the server
+    this.wss = new WebSocketServer({ server: httpServer, path: '/audio-ws', verifyClient });
+    logger.info({ path: '/audio-ws' }, 'Audio WS server listening (persistent)');
   }
 
   onStop(callback: () => void) {
@@ -32,6 +45,41 @@ export class AudioCapture {
 
   async startCapture(onChunk: (base64Chunk: string) => void): Promise<void> {
     this.onChunkCallback = onChunk;
+    this.capturing = false;
+
+    // Handle incoming connections (new or reconnect)
+    this.wss.on('connection', (ws) => {
+      logger.info('Chrome extension audio WebSocket connected!');
+
+      // Start a new capture session
+      this.startSession();
+
+      ws.on('message', (data: Buffer) => {
+        this.rawFileStream?.write(data);
+        this.ffmpegProcess?.stdin?.write(data);
+      });
+
+      ws.on('close', () => {
+        logger.info('Chrome extension disconnected — stopping capture session');
+        this.stopSession();
+        this.onStopCallback?.();
+      });
+    });
+
+    // Wait for first extension connection
+    await new Promise<void>(resolve => {
+      this.wss.once('connection', () => {
+        logger.info('Extension connected, audio capture pipeline active');
+        resolve();
+      });
+    });
+  }
+
+  private startSession() {
+    if (this.capturing) {
+      this.stopSession();
+    }
+    this.capturing = true;
 
     // Create recordings directory
     mkdirSync(RECORDINGS_DIR, { recursive: true });
@@ -43,26 +91,7 @@ export class AudioCapture {
     this.pcmFileStream = createWriteStream(this.pcmFilePath);
     logger.info({ rawFilePath: this.rawFilePath, pcmFilePath: this.pcmFilePath }, 'Saving audio recordings');
 
-    // Verify auth token on WebSocket upgrade
-    const verifyClient = (info: { origin: string; req: IncomingMessage; secure: boolean }) => {
-      if (!config.authToken) return true; // no token configured = allow all
-      const url = new URL(info.req.url || '', `http://${info.req.headers.host}`);
-      const token = url.searchParams.get('token');
-      if (token === config.authToken) return true;
-      logger.warn({ origin: info.origin }, 'WebSocket connection rejected — invalid token');
-      return false;
-    };
-
-    // 1. Start WebSocket server for extension audio data (on shared HTTP server at /audio-ws)
-    if (this.httpServer) {
-      this.wss = new WebSocketServer({ server: this.httpServer, path: '/audio-ws', verifyClient });
-      logger.info({ path: '/audio-ws' }, 'Audio WS server listening on shared HTTP server');
-    } else {
-      this.wss = new WebSocketServer({ port: 3001, verifyClient });
-      logger.info({ port: 3001 }, 'Audio WS server listening on standalone port');
-    }
-
-    // 2. Start ffmpeg
+    // Start ffmpeg
     this.ffmpegProcess = spawn('ffmpeg', [
       '-i', 'pipe:0', '-f', 's16le', '-ar', '16000', '-ac', '1',
       '-acodec', 'pcm_s16le', 'pipe:1',
@@ -91,50 +120,28 @@ export class AudioCapture {
         }
       }
     });
-
-    // 3. Handle incoming audio from extension
-    let totalBytes = 0;
-    this.wss.on('connection', (ws) => {
-      logger.info('Chrome extension audio WebSocket connected!');
-      ws.on('message', (data: Buffer) => {
-        totalBytes += data.length;
-        this.rawFileStream?.write(data);
-        this.ffmpegProcess?.stdin?.write(data);
-        if (totalBytes % 20000 < data.length) {
-          logger.info({ totalBytes, pcmChunksSent }, 'Audio stats');
-        }
-      });
-      ws.on('close', () => {
-        logger.info('Chrome extension disconnected — cleaning up recordings');
-        this.stop();
-        this.onStopCallback?.();
-      });
-    });
-
-    // 4. Wait for extension connection
-    await new Promise<void>(resolve => {
-      this.wss!.once('connection', () => {
-        logger.info('Extension connected, audio capture pipeline active');
-        resolve();
-      });
-    });
   }
 
-  stop() {
-    logger.info('Stopping audio capture...');
+  private stopSession() {
+    if (!this.capturing) return;
+    this.capturing = false;
+
+    logger.info('Stopping capture session...');
     if (this.rawFileStream) { this.rawFileStream.end(); this.rawFileStream = null; }
     if (this.pcmFileStream) { this.pcmFileStream.end(); this.pcmFileStream = null; }
-    if (this.wss) { this.wss.close(); this.wss = null; }
     if (this.ffmpegProcess) {
       this.ffmpegProcess.stdin?.end();
       this.ffmpegProcess.kill('SIGTERM');
       this.ffmpegProcess = null;
     }
-    this.onChunkCallback = null;
 
-    // Delete local recording files
     this.deleteRecordings();
-    logger.info('Audio capture stopped and recordings deleted');
+    logger.info('Capture session stopped and recordings deleted');
+  }
+
+  stop() {
+    this.stopSession();
+    this.onChunkCallback = null;
   }
 
   private deleteRecordings() {
@@ -147,7 +154,6 @@ export class AudioCapture {
       this.pcmFilePath = null;
     }
 
-    // Remove recordings directory if empty
     try {
       if (existsSync(RECORDINGS_DIR) && readdirSync(RECORDINGS_DIR).length === 0) {
         rmdirSync(RECORDINGS_DIR);

@@ -54,4 +54,8 @@ export class TranscriptBuffer {
   getFullTranscript(): string {
     return this.entries.map(e => e.text).join(' ');
   }
+
+  clear() {
+    this.entries = [];
+  }
 }
