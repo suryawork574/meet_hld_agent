@@ -8,8 +8,9 @@
 *AI-Powered Real-Time System Design Diagram Generator for Google Meet*
 
 - POC / Innovation Project
-- Tech Stack: Node.js, TypeScript, Gemini AI, Chrome Extension, Socket.IO
+- Tech Stack: Node.js, TypeScript, Gemini AI (Live API + REST API), Chrome Extension, Socket.IO, Mermaid.js
 - Deployed on Google Cloud Run with App-Level Token Authentication
+- AI Models: `gemini-2.5-flash-native-audio-latest` (Live) + `gemini-3.1-pro-preview` (REST)
 
 ---
 
@@ -45,64 +46,94 @@
 **Meet HLD Agent** is an AI-powered tool that:
 
 1. **Captures** meeting audio via a Chrome Extension (since Meet Media API is unavailable)
-2. **Transcribes** the conversation in real-time using Gemini Live API
+2. **Transcribes** the conversation in real-time using Gemini Live API (`gemini-2.5-flash-native-audio-latest`)
 3. **Detects** system design discussions using keyword heuristics + AI-flagging
-4. **Generates** live Mermaid.js architecture diagrams automatically
-5. **Accepts voice commands** — participants can say *"Hey HLD Agent, add a reporting service with OLAP database"* and the diagram updates live
-6. **Generates** meeting summaries, architecture advice, and action item tasks
-7. **Displays** everything on a real-time web dashboard
+4. **Generates** live Mermaid.js architecture diagrams automatically using Gemini REST API (`gemini-3.1-pro-preview`)
+5. **Accepts voice commands** — participants can say *"Hey Sri, add a reporting service with OLAP database"* and the diagram updates live
+6. **Defers heavy processing** — summary, advice, and tasks are generated on stop-capture for optimal real-time performance
+7. **Displays** everything on a real-time web dashboard with zoom controls
 8. **Saves** meeting artifacts (transcript, diagrams, summaries) to Google Cloud Storage
+9. **Preserves state** on page refresh — all data persists until explicitly cleared
 
 ---
 
 ## Slide 5: Architecture Diagram
 
 ```
-User's Browser (Google Meet Tab)
-        │
-        ▼
-Chrome Extension (tabCapture API)
-        │
-        ▼ WebSocket (/audio-ws)
-        │
-   ┌────────────────────────────────────────────┐
-   │  Cloud Run Service (Single Port: 8080)     │
-   │                                            │
-   │  ┌─────────────────────────────────────┐   │
-   │  │ Express + Socket.IO Server          │   │
-   │  │   ├── /           Dashboard (HTTP)  │   │
-   │  │   ├── /api/*      REST APIs         │   │
-   │  │   ├── /socket.io  Real-time events  │   │
-   │  │   └── /audio-ws   Audio WebSocket   │   │
-   │  └─────────────────────────────────────┘   │
-   │         │                                  │
-   │         ▼                                  │
-   │  ffmpeg (WebM/Opus → PCM 16kHz mono)       │
-   │         │                                  │
-   │         ▼                                  │
-   │  Gemini Live API (WebSocket)               │
-   │    └── Real-time transcription             │
-   │    └── [DESIGN] flag detection             │
-   │         │                                  │
-   │         ▼                                  │
-   │  Design Detector (keyword heuristic)       │
-   │         │                                  │
-   │         ▼                                  │
-   │  Gemini REST API (parallel generation)     │
-   │    ├── Mermaid.js diagram                  │
-   │    ├── Meeting summary                     │
-   │    ├── Architecture advice                 │
-   │    └── Action item tasks                   │
-   │         │                                  │
-   │         ▼                                  │
-   │  Socket.IO → Dashboard (real-time push)    │
-   │         │                                  │
-   │         ▼                                  │
-   │  Google Cloud Storage (persistence)        │
-   └────────────────────────────────────────────┘
-        │
-        ▼
-   User's Browser (Dashboard via Cloud Run URL)
+                          Google Meet Tab (Browser)
+                                  │
+                                  ▼
+                    ┌──────────────────────────┐
+                    │  Chrome Extension (MV3)  │
+                    │  ├── popup.js (config)   │
+                    │  ├── background.js       │
+                    │  └── offscreen.js         │
+                    │      (tabCapture + WS)    │
+                    └────────────┬───────────────┘
+                                 │ WebSocket (wss://)
+                                 │ ?token=AUTH_TOKEN
+                                 ▼
+              ┌──────────────────────────────────────────────┐
+              │       Cloud Run Service (Port 8080)          │
+              │                                              │
+              │  ┌────────────────────────────────────────┐  │
+              │  │  Express + Socket.IO Server             │  │
+              │  │    ├── /            Dashboard (HTTP)    │  │
+              │  │    │                (cookie auth)       │  │
+              │  │    ├── /api/*       REST APIs           │  │
+              │  │    ├── /socket.io   Real-time events    │  │
+              │  │    └── /audio-ws    Audio WebSocket     │  │
+              │  │         (persistent, token auth)        │  │
+              │  └──────────────┬──────────────────────────┘  │
+              │                 │                              │
+              │                 ▼                              │
+              │         ffmpeg (WebM/Opus → PCM 16kHz mono)   │
+              │                 │                              │
+              │                 ▼                              │
+              │     Gemini Live API (WebSocket)                │
+              │       model: gemini-2.5-flash-native-audio     │
+              │       ├── inputAudioTranscription              │
+              │       │   (real-time speech-to-text)           │
+              │       ├── outputAudioTranscription             │
+              │       │   ([DESIGN] flag detection)            │
+              │       └── responseModalities: AUDIO            │
+              │                 │                              │
+              │                 ▼                              │
+              │     ┌───────────────────────────┐              │
+              │     │  Analysis Pipeline         │             │
+              │     │  ├── Design Detector       │             │
+              │     │  │   (keyword heuristic    │             │
+              │     │  │    + AI [DESIGN] flag)  │             │
+              │     │  ├── Voice Command Detector│             │
+              │     │  │   ("Hey Sri, ...")       │             │
+              │     │  └── Transcript Buffer     │             │
+              │     │      (cumulative dedup,    │             │
+              │     │       3s flush timer)      │             │
+              │     └───────────┬───────────────┘              │
+              │                 │                              │
+              │      ┌──────────┴──────────┐                   │
+              │      ▼ (real-time)         ▼ (on stop-capture) │
+              │  Gemini REST API      Gemini REST API           │
+              │  gemini-3.1-pro       gemini-3.1-pro            │
+              │  └── Mermaid.js       ├── Meeting Summary       │
+              │      diagram          ├── Architecture Advice   │
+              │      (auto-styled)    └── Task Breakdown        │
+              │                 │                              │
+              │                 ▼                              │
+              │     Socket.IO → Dashboard (real-time push)     │
+              │     (sends full state on reconnect)            │
+              │                 │                              │
+              │                 ▼                              │
+              │     Google Cloud Storage (persistence)         │
+              └──────────────────────────────────────────────┘
+                                │
+                                ▼
+                   User's Browser (Dashboard)
+                   ├── Mermaid.js diagram (60% initial zoom)
+                   ├── Live transcript
+                   ├── Floating popups: Summary, Suggestions,
+                   │   Tasks, Transcript
+                   └── Controls: Update, Clear, Save, Load
 ```
 
 ---
@@ -112,16 +143,16 @@ Chrome Extension (tabCapture API)
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Audio Capture | Chrome Extension (MV3) + tabCapture API | Capture Google Meet tab audio |
-| Audio Transport | WebSocket (`/audio-ws` on shared port) | Stream audio from extension to server |
+| Audio Transport | WebSocket (`/audio-ws` with persistent server) | Stream audio from extension to server |
 | Audio Processing | ffmpeg | Transcode WebM/Opus to PCM (16kHz, 16-bit, mono) |
-| Transcription | Gemini Live API (WebSocket) | Real-time speech-to-text |
-| Design Detection | Custom keyword heuristic + Gemini AI flag | Identify system design discussions |
-| Diagram Generation | Gemini REST API (gemini-2.5-flash) | Generate Mermaid.js code from transcript |
-| Content Generation | Gemini REST API (parallel) | Summary, advice, and tasks generation |
-| Real-time Dashboard | Express + Socket.IO + Mermaid.js | Live visualization |
+| Transcription | Gemini Live API (`gemini-2.5-flash-native-audio-latest`) | Real-time speech-to-text with cumulative deduplication |
+| Design Detection | Keyword heuristic + Gemini AI [DESIGN] flag | Identify system design discussions |
+| Diagram Generation | Gemini REST API (`gemini-3.1-pro-preview`) | Generate Mermaid.js code from transcript |
+| Content Generation | Gemini REST API (deferred to stop-capture) | Summary, advice, and tasks generation |
+| Real-time Dashboard | Express + Socket.IO + Mermaid.js | Live visualization with state preservation |
 | Storage | Google Cloud Storage (GCS) | Persist meeting data |
 | Deployment | Docker + GCP Cloud Run | Containerized cloud deployment |
-| Authentication | App-level AUTH_TOKEN on WebSocket | Shared secret validated on connection upgrade |
+| Authentication | App-level AUTH_TOKEN (cookie + WebSocket) | Login page + token-based WebSocket auth |
 | Language | TypeScript / Node.js | Backend runtime |
 
 ---
@@ -131,46 +162,50 @@ Chrome Extension (tabCapture API)
 Since **Google Meet Media API is not available**, we built a custom Chrome Extension:
 
 1. **Manifest V3** extension with `tabCapture` and `offscreen` permissions
-2. User clicks "Start Capture" on the extension popup while on a Google Meet tab
-3. Extension creates an **offscreen document** for audio processing
-4. `chrome.tabCapture.capture()` captures the tab's audio stream
-5. Audio is encoded and sent via **WebSocket** to the backend server at `/audio-ws`
-6. The backend receives the audio stream and pipes it through ffmpeg for format conversion
+2. User configures **Server URL** and **Auth Token** in the extension popup
+3. User clicks "Start Capture" while on a Google Meet tab
+4. Extension creates an **offscreen document** for audio processing
+5. `chrome.tabCapture.capture()` captures the tab's audio stream
+6. Audio is encoded and sent via **WebSocket** to the backend at `/audio-ws?token=AUTH_TOKEN`
+7. Backend receives audio and pipes through ffmpeg for format conversion
 
-**Single Port Architecture:**
-- Dashboard, REST APIs, Socket.IO, and Audio WebSocket all run on a **single port**
-- Audio WebSocket is mounted at `/audio-ws` path on the same Express server
-- This makes the app compatible with Cloud Run (which only supports one port)
-
-**Why Chrome Extension?**
-- Google Meet does not expose a public Media API for third-party audio access
-- Chrome's `tabCapture` API is the only reliable way to capture meeting audio
-- Works without any Google Meet API keys or OAuth scopes for meeting media
+**Key Design Decisions:**
+- `chrome.storage.sync` is NOT available in offscreen documents — config is passed via messages from background.js
+- WebSocket URL is built from the Server URL: `https://` → `wss://` + `/audio-ws?token=`
+- All services (HTTP, WebSocket, Socket.IO) run on a **single port** for Cloud Run compatibility
 
 ---
 
 ## Slide 8: AI Processing Pipeline
 
 ### Stage 1: Real-Time Transcription
-- Audio chunks (250ms segments) are base64-encoded and sent to **Gemini Live API** via WebSocket
-- Gemini returns transcribed text in real-time
-- Model is instructed to flag design discussions with `[DESIGN]` prefix
+- Audio chunks (250ms PCM segments) sent to **Gemini Live API** via WebSocket
+- Model: `gemini-2.5-flash-native-audio-latest` with `responseModalities: ['AUDIO']`
+- `inputAudioTranscription` enabled for speech-to-text
+- `outputAudioTranscription` enabled for detecting model's [DESIGN] response
+- **Cumulative deduplication** — detects if Gemini sends full transcript vs incremental fragments
+- **3-second flush timer** — waits for complete phrases before emitting to dashboard
 
 ### Stage 2: Design Detection
-- **Keyword heuristic**: Scans transcript for terms like "architecture", "microservice", "database", "API gateway", "load balancer", etc.
-- **AI flag**: Gemini model also flags design content with `[DESIGN]` tag
+- **Keyword heuristic**: Scans accumulated transcript (last 2 min) for terms like "architecture", "microservice", "database", "API gateway", "load balancer", etc.
+- **AI flag**: Gemini model flags design content with `[DESIGN]` tag via outputTranscription
 - Detection is debounced (every 15 seconds) to avoid excessive API calls
 
-### Stage 3: Diagram + Summary + Advice + Tasks Generation (Parallel)
-When design discussion is detected, four parallel requests are made to **Gemini REST API**:
-- **Mermaid.js diagram** generation from the last 2 minutes of transcript
-- **Meeting summary** generation in bullet-point format
-- **Architecture advice** with best practices and recommendations
-- **Action item tasks** extracted from the discussion
+### Stage 3: Diagram Generation (Real-Time)
+When design discussion is detected:
+- **Mermaid.js diagram** generated from last 2 minutes of transcript using `gemini-3.1-pro-preview`
+- Auto-styled with color-coded nodes (blue=databases, purple=services, orange=queues, green=external, red=caches)
+- Sent to dashboard via Socket.IO at 60% initial zoom
+
+### Stage 4: Content Generation (On Stop-Capture)
+When the Chrome extension stops capture, three parallel requests are made:
+- **Meeting summary** — structured HTML with topic, key components, data flow
+- **Architecture advice** — specific recommendations (reliability, scalability, security, etc.)
+- **Task breakdown** — Jira-style task cards with priorities, descriptions, acceptance criteria, and AI-assisted time estimates
 
 ---
 
-## Slide 9: Live Voice Commands - "Hey HLD Agent"
+## Slide 9: Live Voice Commands - "Hey Sri"
 
 ### The Problem
 During a meeting, manually clicking buttons to update diagrams breaks the discussion flow.
@@ -178,34 +213,30 @@ During a meeting, manually clicking buttons to update diagrams breaks the discus
 ### The Solution
 Participants can speak directly to the agent during the meeting:
 
-> *"Hey HLD Agent, can you update the diagram to add an extra service to generate reports using OLAP database"*
+> *"Hey Sri, add a Redis cache between the API gateway and the database"*
 
 ### How It Works
-1. **Trigger Detection** — The system continuously monitors the transcript for wake phrases:
-   - "Hey HLD Agent", "Hey Agent", "Hey Diagram Agent", etc.
-2. **Instruction Extraction** — Everything after the trigger phrase is extracted as the instruction
-   - E.g., *"add an extra service to generate reports using OLAP database"*
-3. **Diagram Update** — The instruction is sent to Gemini REST API along with the full session transcript
-   - Gemini updates the existing diagram, preserving current components and adding new ones per the instruction
-4. **Live Feedback** — The dashboard shows:
-   - A green banner: "Voice Command Detected" with the instruction text
-   - The transcript highlights the voice command entry
-   - The diagram auto-updates within seconds
-   - Banner shows "Done!" when complete
+1. **Trigger Detection** — Continuous monitoring for wake phrases:
+   - Primary: "Hey Sri" (variants: Sree, Shri, Shree, Siri)
+   - Fallback: "Hey Agent", "Hey HLD"
+   - Speech recognition variants handled: Three, Tree, Free, See
+2. **Instruction Extraction** — Everything after the trigger phrase is the instruction
+3. **Diagram Update** — Full session transcript + instruction sent to Gemini REST API
+4. **Live Feedback** — Dashboard shows green banner with instruction text, then "Done!" on completion
 
 ### Example Voice Commands
 | Voice Command | Action |
 |--------------|--------|
-| *"Hey HLD Agent, add a Redis cache between the API gateway and the database"* | Adds a cache layer to the diagram |
-| *"Hey Agent, replace Kafka with RabbitMQ"* | Swaps the message broker component |
-| *"Hey HLD Agent, add a reporting service that reads from an OLAP database"* | Adds reporting service + OLAP DB nodes |
-| *"Hey Agent, show async communication between order service and notification service"* | Updates edge to dashed async arrow |
-| *"Hey HLD Agent, split the monolith into user service and payment service"* | Refactors the architecture diagram |
+| *"Hey Sri, add a Redis cache between the API gateway and the database"* | Adds a cache layer to the diagram |
+| *"Hey Sri, replace Kafka with RabbitMQ"* | Swaps the message broker component |
+| *"Hey Sri, add a reporting service that reads from an OLAP database"* | Adds reporting service + OLAP DB nodes |
+| *"Hey Sri, show async communication between order and notification"* | Updates edge to dashed async arrow |
+| *"Hey Sri, split the monolith into user service and payment service"* | Refactors the architecture diagram |
 
 ### Safety
 - **10-second cooldown** between voice commands to prevent accidental triggers
 - **Minimum instruction length** required (>10 chars) to avoid false positives
-- Commands are logged in the transcript with a special voice command tag
+- Commands logged in transcript with special voice command tag
 
 ---
 
@@ -213,17 +244,24 @@ Participants can speak directly to the agent during the meeting:
 
 The web dashboard provides:
 
-- **Live Transcript Panel** - Scrolling transcript with highlighted design-related segments
-- **Mermaid.js Diagram Panel** - Auto-updating architecture diagram rendered in SVG
-- **Meeting Summary Panel** - AI-generated bullet-point summary
-- **Architecture Advice Panel** - Best practice recommendations
-- **Action Items / Tasks Panel** - Extracted tasks from the discussion
-- **Manual Controls**:
-  - "Update Diagram" button with optional suggestion text
-  - "Reset Diagram" to clear and start fresh
-  - "Save Meeting" to persist data to GCS
-  - "Load Meeting" to restore previous meeting data
-- **Status Indicators** - Connection state for Gemini, extension, and WebSocket
+- **Mermaid.js Diagram Panel** — Auto-updating architecture diagram with:
+  - 60% initial zoom (adjustable via +/- buttons or Ctrl+scroll)
+  - "Fit" button to auto-fit to container
+  - "Show Code" toggle to view raw Mermaid source
+  - Color-coded nodes by type (database, service, queue, external, cache)
+- **Floating Popup Widgets** (bottom-right):
+  - **Tasks** — Jira-style task cards with priority, description, acceptance criteria
+  - **Suggestions** — AI architecture recommendations
+  - **Summary** — Meeting discussion summary
+  - **Transcript** — Raw scrolling transcript with entry count
+- **Voice Command Banner** — Green notification bar when voice command is detected
+- **Controls**:
+  - "Update Diagram" — Manual update with optional suggestion text
+  - "Clear" — Resets ALL data (diagram, transcript, summary, suggestions, tasks)
+  - "Save Meeting" — Persist to Google Cloud Storage
+  - "Load Meeting" — Restore from GCS with "Regenerate All" option
+- **State Preservation** — All data survives page refresh (server sends full state on reconnect)
+- **Login Page** — Auth token required to access dashboard (cookie-based session)
 
 ---
 
@@ -231,22 +269,33 @@ The web dashboard provides:
 
 | Feature | Description |
 |---------|-------------|
-| Real-time Transcription | Live speech-to-text using Gemini Live API |
-| Auto Design Detection | Keyword heuristic + AI-based detection of design discussions |
-| Live Diagram Generation | Automatic Mermaid.js diagrams updated as discussion evolves |
-| Voice Commands | Say *"Hey HLD Agent, add a cache layer"* — diagram updates live from voice |
-| Meeting Summaries | AI-generated summaries of key discussion points |
-| Architecture Advice | Context-aware recommendations and best practices |
-| Action Item Tasks | Extracted tasks and next steps from discussion |
-| Manual Diagram Control | Users can trigger updates with custom suggestions via dashboard |
-| Meeting Persistence | Save/load meeting data to/from Google Cloud Storage |
-| Single Port Architecture | All services (HTTP, WebSocket, Socket.IO) on one port for cloud compatibility |
-| Cloud Deployment | Dockerized and deployed to GCP Cloud Run |
-| IAM Authentication | Google account-based access control — no public exposure |
+| Real-time Transcription | Live speech-to-text via Gemini Live API with cumulative deduplication |
+| Auto Design Detection | Keyword heuristic + AI [DESIGN] flag from Gemini |
+| Live Mermaid.js Diagrams | Auto-generated, color-styled diagrams at 60% initial zoom |
+| Voice Commands | Say *"Hey Sri, add a cache layer"* — diagram updates live |
+| Deferred Content | Summary, advice, tasks generated on stop-capture (not real-time) for performance |
+| Persistent WebSocket | `/audio-ws` stays alive — supports extension reconnections without 503 |
+| State Preservation | Page refresh preserves all data (transcript, diagram, summary, etc.) |
+| Clear All | Single button resets everything — diagram, transcript, summary, suggestions, tasks |
+| Meeting Persistence | Save/load to Google Cloud Storage with regeneration support |
+| Cookie Auth | Login page with AUTH_TOKEN → HTTP-only session cookie |
+| Cloud Native | Single-port architecture, direct Cloud Run WebSocket, no proxy needed |
 
 ---
 
-## Slide 12: Deployment on GCP Cloud Run
+## Slide 12: Performance Optimizations
+
+| Optimization | Before | After |
+|-------------|--------|-------|
+| Content generation | All 4 (diagram + summary + advice + tasks) on every design detection | Only diagram in real-time; summary/advice/tasks deferred to stop-capture |
+| Transcript flushing | 2s timer, immediate flush on punctuation | 3s timer, no premature flush — fewer fragmented entries |
+| Cumulative dedup | Not handled — duplicate text when Gemini sends full transcript | Detects cumulative vs incremental — extracts only new text |
+| WebSocket server | Destroyed on disconnect — 503 on reconnect | Persistent WSS — survives reconnections |
+| State on refresh | Lost all data except diagram | Server sends full state (transcript, summary, advice, tasks) to new connections |
+
+---
+
+## Slide 13: Deployment on GCP Cloud Run
 
 ### Architecture
 ```
@@ -257,10 +306,10 @@ Chrome Extension → wss://meet-hld-agent-XXX.run.app/audio-ws?token=AUTH_TOKEN
               (asia-south1 region)
               ┌─────────────────┐
               │ Single Port 8080│
-              │ ├── Dashboard   │
+              │ ├── Dashboard   │  ◄── Cookie-based login
               │ ├── /api/*      │
               │ ├── /socket.io  │
-              │ └── /audio-ws   │  ← AUTH_TOKEN validated on upgrade
+              │ └── /audio-ws   │  ◄── Token validated on upgrade
               └────────┬────────┘
                        │
                        ▼
@@ -272,87 +321,57 @@ Chrome Extension → wss://meet-hld-agent-XXX.run.app/audio-ws?token=AUTH_TOKEN
 | Decision | Why |
 |----------|-----|
 | **Single port (8080)** | Cloud Run only supports one port per service |
-| **Audio WebSocket at `/audio-ws`** | Merged onto same Express server instead of separate port |
-| **App-level AUTH_TOKEN** | Browser WebSockets can't send IAM auth headers; shared secret validated on WS upgrade |
+| **Persistent WebSocket server** | `/audio-ws` stays alive — no 503 on extension reconnect |
+| **App-level AUTH_TOKEN** | Browser WebSockets can't send IAM headers; token validated on WS upgrade |
+| **Cookie-based dashboard auth** | Login page → session cookie → all routes protected |
 | **Direct Cloud Run connection** | Cloud Run natively supports WebSockets over HTTPS — no proxy needed |
-| **Session affinity** | Required for Socket.IO and WebSocket sticky sessions |
-| **Timeout: 3600s** | Supports long-running WebSocket connections (up to 1 hour) |
+| **Deferred content generation** | Only diagram generated real-time; summary/advice/tasks on stop-capture |
 
-### Cloud Run Configuration
-| Setting | Value | Reason |
-|---------|-------|--------|
-| Port | 8080 | Cloud Run default |
-| Memory | 1Gi | ffmpeg + Node.js processing |
-| CPU | 1 vCPU | Audio processing workload |
-| Timeout | 3600s | Long-running WebSocket sessions |
-| Min instances | 0 | Scale to zero when idle (cost savings) |
-| Max instances | 3 | Handle concurrent meetings |
-| Session affinity | Enabled | WebSocket + Socket.IO require it |
-| Ingress | All | Chrome extension connects directly |
-| Auth | AUTH_TOKEN (app-level) | Shared secret on WebSocket connections |
-
-### Build & Deploy Commands
+### Build & Deploy
 ```bash
-# Deploy from source (builds via Cloud Build)
+# One-command deploy from source
 gcloud run deploy meet-hld-agent \
-  --region=REGION --source=. --allow-unauthenticated \
-  --update-env-vars="AUTH_TOKEN=your-secret-token"
-
-# Or build and deploy separately
-gcloud builds submit . \
-  --tag=REGION-docker.pkg.dev/PROJECT/meet-hld-agent/meet-hld-agent:latest \
-  --region=REGION
-
-gcloud run deploy meet-hld-agent \
-  --image=REGION-docker.pkg.dev/PROJECT/meet-hld-agent/meet-hld-agent:latest \
-  --region=REGION --port=8080 --timeout=3600 \
-  --session-affinity --allow-unauthenticated \
-  --update-env-vars="AUTH_TOKEN=your-secret-token"
+  --source . \
+  --region=asia-south1 \
+  --allow-unauthenticated \
+  --set-env-vars="GEMINI_API_KEY=key,GCS_BUCKET_NAME=bucket,AUTH_TOKEN=token"
 ```
 
 ---
 
-## Slide 13: Demo Flow
+## Slide 14: Demo Flow
 
-1. **Open the dashboard** at your Cloud Run URL: `https://meet-hld-agent-XXX.REGION.run.app`
-2. **Configure the Chrome Extension** — set the Server URL and Auth Token in the extension popup
+1. **Open the dashboard** at your Cloud Run URL — enter AUTH_TOKEN to log in
+2. **Configure the Chrome Extension** — set Server URL and Auth Token in popup
 3. **Join a Google Meet** in Chrome
-4. **Click the Chrome Extension** popup and hit "Start Capture"
+4. **Click the Chrome Extension** and hit "Start Capture"
 5. **Begin discussing** system design topics in the meeting
 6. **Watch the dashboard update in real-time:**
-   - Transcript appears on the left
-   - Mermaid.js diagram auto-generates on the right
-   - Summary, advice, and tasks panels update
-7. **Use voice commands** to refine the diagram during the meeting:
-   - Say: *"Hey HLD Agent, add a reporting service connected to an OLAP database"*
+   - Transcript appears in the Transcript popup
+   - Mermaid.js diagram auto-generates in the main panel
+7. **Use voice commands** to refine the diagram:
+   - Say: *"Hey Sri, add a reporting service connected to an OLAP database"*
    - Watch the green banner appear and diagram update live
-8. **Save the meeting** data to GCS for future reference
-9. **Load previous meetings** from GCS and regenerate content
+8. **Stop capture** — summary, suggestions, and tasks are generated automatically
+9. **Save the meeting** to GCS for future reference
+10. **Clear** to reset all data and start fresh
 
 ---
 
-## Slide 14: Security & Access Control
+## Slide 15: Security & Access Control
 
 | Aspect | Implementation |
 |--------|---------------|
-| **WebSocket Auth** | App-level `AUTH_TOKEN` — validated on WebSocket upgrade via `?token=` query param |
+| **WebSocket Auth** | AUTH_TOKEN validated on upgrade via `?token=` query param |
+| **Dashboard Auth** | Login page → AUTH_TOKEN → HTTP-only session cookie (24h expiry) |
+| **Socket.IO Auth** | Session cookie or handshake token |
 | **Transport** | HTTPS / WSS (Google-managed TLS on Cloud Run URL) |
-| **Direct access** | Chrome extension connects directly to Cloud Run — no proxy needed |
-| **Dashboard** | Accessible via Cloud Run HTTPS URL |
-| **API keys** | Gemini API key and AUTH_TOKEN stored as Cloud Run environment variables |
-| **No domain required** | Works with the default Cloud Run URL |
-| **No proxy required** | Cloud Run natively supports WebSockets over HTTPS |
-
-### Access Control Flow
-```
-WebSocket without token → Server rejects upgrade (403)
-WebSocket with valid token → Server accepts → audio streaming begins
-Dashboard (HTTP) → Cloud Run → 200 OK
-```
+| **API Keys** | Gemini API key and AUTH_TOKEN stored as Cloud Run env vars |
+| **No proxy needed** | Chrome extension connects directly to Cloud Run |
 
 ---
 
-## Slide 15: Cost Analysis
+## Slide 16: Cost Analysis
 
 | Resource | Cost |
 |----------|------|
@@ -360,16 +379,15 @@ Dashboard (HTTP) → Cloud Run → 200 OK
 | Google Cloud Storage | ~$0.02/GB/month |
 | Gemini API | Pay per token (see Google AI pricing) |
 | SSL Certificate | Free (Google-managed) |
-| IAM Authentication | Free |
 | Cloud Build | 120 min/day free tier |
 | **Total infrastructure** | **~$5-15/month** (excluding Gemini API) |
 
 ---
 
-## Slide 16: Limitations & Future Scope
+## Slide 17: Limitations & Future Scope
 
 ### Current Limitations
-- **Google Meet Media API not available** - relies on Chrome Extension for audio capture (requires user to manually start capture)
+- **Google Meet Media API not available** — relies on Chrome Extension for audio capture
 - Chrome Extension must run on the same machine as the meeting participant
 - Audio quality depends on the user's tab audio output
 - AUTH_TOKEN must be shared with Chrome extension users
@@ -377,37 +395,39 @@ Dashboard (HTTP) → Cloud Run → 200 OK
 
 ### Future Scope
 - Integrate with **Google Meet Media API** when it becomes publicly available
-- Add **IAP (Identity-Aware Proxy)** with a custom domain for Google-account-based auth on all endpoints
+- **Gemini image generation** for architecture diagrams (visual diagrams instead of Mermaid)
 - Support for **multiple diagram types** (sequence diagrams, ER diagrams, C4 model)
 - **Multi-language** transcription support
-- **Speaker diarization** - identify who said what
+- **Speaker diarization** — identify who said what
 - **Meeting recording** with synchronized diagram timeline
 - Export diagrams to **Confluence, Notion, or Google Docs**
 - **Slack/Teams integration** for sharing diagrams post-meeting
-- **CI/CD pipeline** with Cloud Build triggers for auto-deploy on git push
+- Add **IAP (Identity-Aware Proxy)** with custom domain for Google-account-based auth
 
 ---
 
-## Slide 17: Summary
+## Slide 18: Summary
 
-- **Meet HLD Agent** automates the creation of system design diagrams during Google Meet calls
-- Uses **Gemini AI** for both transcription and diagram generation
+- **Meet HLD Agent** automates creation of system design diagrams during Google Meet calls
+- Uses **Gemini Live API** (`gemini-2.5-flash-native-audio-latest`) for real-time transcription
+- Uses **Gemini REST API** (`gemini-3.1-pro-preview`) for diagram and content generation
 - **Chrome Extension** approach works around the lack of Google Meet Media API
-- **Single port architecture** makes it Cloud Run compatible
-- **Real-time dashboard** provides instant visual feedback with diagrams, summaries, advice, and tasks
-- **App-level token auth** secures WebSocket connections without needing IAM proxy
-- **Direct Cloud Run connection** — no proxy needed, WebSockets work natively over HTTPS
-- **Cloud-native** deployment on GCP Cloud Run with GCS storage
+- **Performance optimized** — only diagram in real-time; summary/advice/tasks deferred to stop-capture
+- **Robust connectivity** — persistent WebSocket server, state preservation on refresh, cumulative transcript deduplication
+- **Voice commands** via "Hey Sri" — natural language diagram updates during meetings
+- **Cloud-native** deployment on GCP Cloud Run with cookie-based auth
 - Reduces post-meeting documentation effort and captures architectural decisions as they're made
 
 ---
 
-## Slide 18: Thank You
+## Slide 19: Thank You
 
 **Meet HLD Agent**
 *Turning conversations into architecture diagrams, in real-time.*
 
-**Tech Stack:** TypeScript, Node.js, Gemini AI, Chrome Extension, Socket.IO, Mermaid.js, Docker, GCP Cloud Run
+**Tech Stack:** TypeScript, Node.js, Gemini AI (Live API + REST API), Chrome Extension, Socket.IO, Mermaid.js, Docker, GCP Cloud Run
+
+**AI Models:** `gemini-2.5-flash-native-audio-latest` (transcription) + `gemini-3.1-pro-preview` (generation)
 
 **Deployed:** Google Cloud Run (asia-south1) with App-Level Token Authentication
 

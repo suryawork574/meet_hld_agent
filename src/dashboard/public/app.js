@@ -212,9 +212,9 @@ async function renderDiagram(mermaidCode) {
     mermaidOutput.innerHTML = svg;
     mermaidOutput.classList.remove('mermaid-placeholder');
 
-    // Auto-fit after render
+    // Set initial zoom to 60%
     requestAnimationFrame(() => {
-      document.getElementById('zoom-fit').click();
+      setZoom(0.6);
     });
   } catch (err) {
     console.error('Mermaid render error:', err);
@@ -224,8 +224,31 @@ async function renderDiagram(mermaidCode) {
 
 // UI handlers
 resetBtn.addEventListener('click', () => {
-  if (confirm('Reset the current diagram?')) {
-    socket.emit('diagram:reset');
+  if (confirm('Clear all data? This will reset diagram, transcript, summary, suggestions, and tasks.')) {
+    socket.emit('clear:all');
+
+    // Clear diagram
+    mermaidOutput.innerHTML = `
+      <div class="mermaid-placeholder">
+        <div class="placeholder-icon">&#9881;</div>
+        <div>Waiting for system design discussion...</div>
+        <div class="placeholder-sub">Start discussing architecture, databases, APIs, etc.</div>
+      </div>`;
+    mermaidSource.textContent = '';
+
+    // Clear transcript
+    transcriptContainer.innerHTML = '';
+    entryCount = 0;
+    transcriptCount.textContent = '0 entries';
+
+    // Clear summary
+    summaryContainer.innerHTML = '<div class="summary-placeholder">Summary will appear as the discussion progresses...</div>';
+
+    // Clear suggestions
+    document.getElementById('advice-container').innerHTML = '';
+
+    // Clear tasks
+    document.getElementById('tasks-container').innerHTML = '<div class="tasks-placeholder">Tasks will be generated as the design discussion progresses...</div>';
   }
 });
 

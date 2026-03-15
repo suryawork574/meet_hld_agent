@@ -285,16 +285,39 @@ app.use(express.static(path.join(__dirname, 'public')));
 io.on('connection', (socket) => {
   logger.info({ id: socket.id }, 'Dashboard client connected');
 
-  // Send current diagram if one exists
+  // Send current state to newly connected client
   const currentDiagram = getPreviousDiagram();
   if (currentDiagram) {
     socket.emit('diagram:update', currentDiagram);
+  }
+
+  // Send cached summary, advice, tasks, and transcript if available
+  const meetingData = getMeetingDataCallback ? getMeetingDataCallback() : null;
+  if (meetingData) {
+    if (meetingData.summary) socket.emit('summary:update', meetingData.summary);
+    if (meetingData.advice) socket.emit('advice:update', meetingData.advice);
+    if (meetingData.tasks) socket.emit('tasks:update', meetingData.tasks);
+    if (meetingData.transcript && meetingData.transcript.length > 0) {
+      for (const entry of meetingData.transcript) {
+        socket.emit('transcript', { text: entry.text, isDesign: entry.isDesign, timestamp: entry.timestamp });
+      }
+    }
   }
 
   socket.on('diagram:reset', () => {
     resetDiagram();
     io.emit('diagram:update', '');
     logger.info('Diagram reset by user');
+  });
+
+  socket.on('clear:all', () => {
+    resetDiagram();
+    if (onClearAllCallback) onClearAllCallback();
+    io.emit('diagram:update', '');
+    io.emit('summary:update', '');
+    io.emit('advice:update', '');
+    io.emit('tasks:update', '');
+    logger.info('All data cleared by user');
   });
 
   socket.on('diagram:requestUpdate', (data?: { suggestion?: string }) => {
@@ -349,6 +372,12 @@ let onManualUpdateCallback: ((suggestion: string) => void) | null = null;
 
 export function onManualDiagramUpdate(callback: (suggestion: string) => void) {
   onManualUpdateCallback = callback;
+}
+
+let onClearAllCallback: (() => void) | null = null;
+
+export function onClearAll(callback: () => void) {
+  onClearAllCallback = callback;
 }
 
 // Callback to get current meeting data for saving

@@ -6,7 +6,8 @@ import { TranscriptBuffer } from './analysis/transcript-buffer.js';
 import { detectDesignDiscussion } from './analysis/design-detector.js';
 import { detectVoiceCommand } from './analysis/voice-command-detector.js';
 import { generateDiagram, generateSummary, generateAdvice, generateTasks, getPreviousDiagram } from './analysis/diagram-generator.js';
-import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitTasksUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData, server } from './dashboard/server.js';
+import { startDashboard, emitTranscript, emitDiagramUpdate, emitSummaryUpdate, emitAdviceUpdate, emitTasksUpdate, emitStatus, emitVoiceCommand, onManualDiagramUpdate, onGetMeetingData, onClearAll, server } from './dashboard/server.js';
+import { resetDiagram } from './analysis/diagram-generator.js';
 
 async function main() {
   // Validate configuration
@@ -33,9 +34,9 @@ async function main() {
 
   // Voice command detection — keep a sliding window of recent transcript chunks
   const recentChunks: string[] = [];
-  const MAX_VOICE_CHUNKS = 10; // combine last 10 chunks for command detection (handles fragmented speech)
+  const MAX_VOICE_CHUNKS = 10;
   let lastVoiceCommandTime = 0;
-  const VOICE_COMMAND_COOLDOWN_MS = 10000; // 10s cooldown between voice commands
+  const VOICE_COMMAND_COOLDOWN_MS = 10000;
 
   // Register callback so the save endpoint can access current meeting state
   onGetMeetingData(() => ({
@@ -45,6 +46,16 @@ async function main() {
     advice: latestAdvice,
     tasks: latestTasks,
   }));
+
+  // Handle clear all from dashboard
+  onClearAll(() => {
+    transcriptBuffer.clear();
+    resetDiagram();
+    latestSummary = '';
+    latestAdvice = '';
+    latestTasks = '';
+    logger.info('All data cleared');
+  });
 
   // Handle verbatim transcripts from inputAudioTranscription
   geminiClient.on('transcript', (text: string) => {
@@ -58,21 +69,20 @@ async function main() {
     const now = Date.now();
     if (now - lastVoiceCommandTime > VOICE_COMMAND_COOLDOWN_MS) {
       const combined = recentChunks.join(' ');
-      // Log combined text so we can see what speech-to-text produces
       if (combined.toLowerCase().includes('sri') || combined.toLowerCase().includes('sree') || combined.toLowerCase().includes('shri') || combined.toLowerCase().includes('siri') || combined.toLowerCase().includes('three') || combined.toLowerCase().includes('tree') || combined.toLowerCase().includes('free') || combined.toLowerCase().includes('agent') || combined.toLowerCase().includes('hld')) {
         logger.info({ combinedText: combined.substring(0, 300) }, 'Potential voice command text detected — checking...');
       }
       const voiceCmd = detectVoiceCommand(combined);
       if (voiceCmd.detected) {
         lastVoiceCommandTime = now;
-        recentChunks.length = 0; // clear so we don't re-detect
+        recentChunks.length = 0;
         logger.info({ instruction: voiceCmd.instruction }, 'Voice command received — triggering diagram update');
         emitVoiceCommand(voiceCmd.triggerPhrase, voiceCmd.instruction);
         triggerVoiceCommandUpdate(voiceCmd.instruction);
       }
     }
 
-    // Check design keywords against accumulated transcript (last 2 min), not just this fragment
+    // Check design keywords against accumulated transcript (last 2 min)
     const recentText = transcriptBuffer.getRecentText(120000);
     const detection = detectDesignDiscussion(recentText);
     if (detection.isDesign) {
@@ -87,7 +97,7 @@ async function main() {
     triggerDiagramGeneration();
   });
 
-  // Real-time: only generate diagram (no summary/advice/tasks)
+  // Real-time: only generate Mermaid diagram (defer summary/advice/tasks to stop-capture)
   async function triggerDiagramGeneration() {
     if (diagramGenerationInProgress) return;
     const now = Date.now();
@@ -110,7 +120,7 @@ async function main() {
     }
   }
 
-  // Voice command update — only diagram generation in real-time
+  // Voice command update
   async function triggerVoiceCommandUpdate(instruction: string) {
     if (diagramGenerationInProgress) {
       logger.info('Voice command received but generation already in progress');
@@ -134,7 +144,7 @@ async function main() {
     }
   }
 
-  // Manual update button — only diagram generation
+  // Manual update button
   onManualDiagramUpdate(async (suggestion: string) => {
     if (diagramGenerationInProgress) {
       logger.info('Manual update requested but generation already in progress');

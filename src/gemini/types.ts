@@ -5,8 +5,8 @@ export interface GeminiSetupMessage {
       responseModalities: string[];
       speechConfig?: { languageCode?: string };
     };
-    inputAudioTranscription?: {};
-    outputAudioTranscription?: {};
+    inputAudioTranscription?: { model?: string };
+    outputAudioTranscription?: { model?: string };
     systemInstruction?: {
       parts: { text: string }[];
     };

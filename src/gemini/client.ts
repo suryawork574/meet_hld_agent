@@ -19,9 +19,15 @@ export class GeminiLiveClient extends EventEmitter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectTimeout: NodeJS.Timeout | null = null;
-  private transcriptBuffer = '';  // accumulates word fragments into sentences
-  private flushTimer: NodeJS.Timeout | null = null;
   private modelBuffer = '';       // model's response (only for [DESIGN] detection)
+
+  // Transcription handling — Gemini inputAudioTranscription may send
+  // cumulative text (full transcript so far) or incremental fragments.
+  // We track the previous transcription to detect and handle both cases.
+  private lastInputTranscription = '';  // last raw text received
+  private pendingTranscript = '';       // new text waiting to be flushed
+  private flushTimer: NodeJS.Timeout | null = null;
+  private debugLogCount = 0;
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -61,13 +67,15 @@ export class GeminiLiveClient extends EventEmitter {
   }
 
   private handleMessage(message: GeminiServerContent, onReady?: (value: void) => void) {
-    // Log top-level keys for debugging
-    const topKeys = Object.keys(message);
-    if (!topKeys.includes('setupComplete')) {
-      logger.info({ topKeys }, 'Gemini message top-level keys');
+    const msg = message as any;
+
+    // Log full raw message for first 10 non-setup messages to debug structure
+    if (this.debugLogCount < 10 && msg.setupComplete === undefined) {
+      this.debugLogCount++;
+      logger.info({ rawMessage: JSON.stringify(msg).substring(0, 1500) }, 'Gemini raw message');
     }
 
-    if (message.setupComplete !== undefined) {
+    if (msg.setupComplete !== undefined) {
       logger.info('Gemini Live API session ready');
       this.isReady = true;
       this.reconnectAttempts = 0;
@@ -76,43 +84,66 @@ export class GeminiLiveClient extends EventEmitter {
       return;
     }
 
-    // Input audio transcription — accumulate fragments, flush as sentences
-    const sc = message.serverContent as any;
+    const sc = msg.serverContent;
 
-    // Log raw message keys for debugging (first few times)
-    if (sc) {
-      const keys = Object.keys(sc);
-      logger.info({ keys }, 'Gemini serverContent keys');
-    }
+    // Input audio transcription — user's speech transcribed to text
+    const inputTranscription = sc?.inputTranscription || msg.inputTranscription;
+    if (inputTranscription) {
+      const t = inputTranscription;
+      const rawText = t.text || t.parts?.map((p: any) => p.text || '').join('') || (typeof t === 'string' ? t : '');
+      if (rawText) {
+        logger.info({ raw: rawText.substring(0, 300), prevLen: this.lastInputTranscription.length }, 'Input transcription received');
 
-    if (sc?.inputTranscription) {
-      const t = sc.inputTranscription;
-      // Handle all possible shapes: { text }, { parts: [{ text }] }, or string
-      const fragment = t.text || t.parts?.map((p: any) => p.text || '').join('') || (typeof t === 'string' ? t : '');
-      if (fragment) {
-        this.transcriptBuffer += fragment;
-        // Reset flush timer — flush after 2s of silence (no new fragments)
-        if (this.flushTimer) clearTimeout(this.flushTimer);
-        this.flushTimer = setTimeout(() => this.flushTranscript(), 2000);
-        // Also flush on sentence-ending punctuation
-        if (/[.!?]$/.test(this.transcriptBuffer.trim())) {
-          this.flushTranscript();
+        // Detect if this is cumulative (starts with previous text) or incremental
+        let newText: string;
+        if (this.lastInputTranscription && rawText.startsWith(this.lastInputTranscription)) {
+          // Cumulative — extract only the new part
+          newText = rawText.substring(this.lastInputTranscription.length);
+          logger.debug({ newText: newText.substring(0, 200) }, 'Cumulative transcription — extracted new portion');
+        } else if (this.lastInputTranscription && rawText.length > this.lastInputTranscription.length * 0.8 && rawText.includes(this.lastInputTranscription.substring(0, 20))) {
+          // Partial overlap — Gemini sometimes re-sends with minor corrections
+          // Use the full new text as it's a corrected version
+          newText = rawText;
+          this.pendingTranscript = ''; // reset pending since this is a correction
+          logger.debug('Corrected transcription received — using full text');
+        } else {
+          // Incremental fragment
+          newText = rawText;
+        }
+
+        this.lastInputTranscription = rawText;
+
+        if (newText.trim()) {
+          // Add space between fragments if needed
+          if (this.pendingTranscript && !this.pendingTranscript.endsWith(' ') && !newText.startsWith(' ')) {
+            this.pendingTranscript += ' ';
+          }
+          this.pendingTranscript += newText;
+
+          // Reset flush timer — wait for more fragments before emitting
+          if (this.flushTimer) clearTimeout(this.flushTimer);
+          this.flushTimer = setTimeout(() => this.flushTranscript(), 3000);
         }
       }
     }
 
-    // Model response — only check for [DESIGN] tag
+    // Model response — check for [DESIGN] tag
     if (sc?.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
         if (part.text) {
           this.modelBuffer += part.text;
+          logger.debug({ modelText: part.text.substring(0, 200) }, 'Model turn text');
         }
       }
     }
 
-    if (sc?.outputTranscription) {
-      const ot = sc.outputTranscription;
-      if (ot.parts) {
+    // Output transcription (model's audio response transcribed)
+    const outputTranscription = sc?.outputTranscription || msg.outputTranscription;
+    if (outputTranscription) {
+      const ot = outputTranscription;
+      if (ot.text) {
+        this.modelBuffer += ot.text;
+      } else if (ot.parts) {
         for (const part of ot.parts) {
           if (part.text) {
             this.modelBuffer += part.text;
@@ -123,10 +154,12 @@ export class GeminiLiveClient extends EventEmitter {
       }
     }
 
-    if (message.serverContent?.turnComplete) {
-      // Flush any remaining transcript fragments
+    // Turn complete — flush everything and check for [DESIGN]
+    if (sc?.turnComplete || sc?.generationComplete) {
       this.flushTranscript();
-      // Check if model flagged this as design discussion
+      // Reset cumulative tracking on turn boundary
+      this.lastInputTranscription = '';
+
       if (this.modelBuffer.includes('[DESIGN]')) {
         logger.info('Model flagged design discussion');
         this.emit('designDetected');
@@ -138,13 +171,18 @@ export class GeminiLiveClient extends EventEmitter {
 
   private flushTranscript() {
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
-    // Strip non-Latin characters (Kannada, Hindi, etc.) — keep only English/Latin + basic punctuation/numbers
-    const englishOnly = this.transcriptBuffer.replace(/[^\x00-\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (englishOnly) {
-      logger.info({ text: englishOnly.substring(0, 150) }, 'Transcript flushed');
-      this.emit('transcript', englishOnly);
+
+    // Strip non-Latin characters but preserve basic punctuation and spacing
+    const cleaned = this.pendingTranscript
+      .replace(/[^\x00-\x7F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (cleaned && cleaned.length > 1) {
+      logger.info({ text: cleaned.substring(0, 200), len: cleaned.length }, 'Transcript flushed');
+      this.emit('transcript', cleaned);
     }
-    this.transcriptBuffer = '';
+    this.pendingTranscript = '';
   }
 
   sendAudioChunk(base64Data: string) {
@@ -181,7 +219,7 @@ export class GeminiLiveClient extends EventEmitter {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
     }
-    this.maxReconnectAttempts = 0; // prevent reconnect on intentional close
+    this.maxReconnectAttempts = 0;
     if (this.ws) {
       this.ws.close();
       this.ws = null;

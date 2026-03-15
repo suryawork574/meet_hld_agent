@@ -12,7 +12,7 @@ export const config = {
   authToken: process.env.AUTH_TOKEN || '',
 
   geminiLiveModel: 'models/gemini-2.5-flash-native-audio-latest',
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: 'gemini-3.1-pro-preview',
 
   get geminiWsUrl() {
     return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.geminiApiKey}`;

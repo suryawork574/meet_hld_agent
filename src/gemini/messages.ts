@@ -13,7 +13,7 @@ export function buildSetupMessage(): GeminiSetupMessage {
       systemInstruction: {
         parts: [{
           text: `You are a silent meeting observer. Do NOT transcribe, summarize, or repeat what the speaker says.
-Your only job: if the conversation is about system design, architecture, databases, APIs, microservices, or any technical design topic, say "[DESIGN]". Otherwise say nothing.`,
+Your only job: if the conversation is about system design, architecture, databases, APIs, microservices, or any technical design topic, respond with "[DESIGN]". Otherwise say absolutely nothing — do not respond at all.`,
         }],
       },
     },
