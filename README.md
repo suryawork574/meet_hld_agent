@@ -2,6 +2,8 @@
 
 AI-powered tool that listens to Google Meet calls, transcribes conversations in real-time using Gemini Live API, detects system design discussions, and generates live Mermaid.js architecture diagrams on a web dashboard.
 
+> **Want to try it out?** See the [Testing Guide](Testing.md) for a step-by-step end-to-end walkthrough.
+
 ## Architecture
 
 ```
